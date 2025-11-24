@@ -1,2 +1,4 @@
+modules = ["nodejs-20"]
 [agent]
 expertMode = true
+integrations = ["javascript_mem_db:1.0.0"]
