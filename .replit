@@ -1,3 +1,4 @@
+run = "npm start"
 modules = ["nodejs-20"]
 [agent]
 expertMode = true
@@ -31,6 +32,6 @@ outputType = "webview"
 localPort = 5000
 externalPort = 80
 
-[[ports]]
-localPort = 43325
-externalPort = 3000
+[deployment]
+deploymentTarget = "cloudrun"
+run = ["sh", "-c", "npm start"]
