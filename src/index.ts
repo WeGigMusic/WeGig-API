@@ -6,6 +6,8 @@ import { Gig, CreateGigInput } from "./types/Gig";
 import { gigs } from "./data/gigsData";
 import db from "./db";
 
+import { searchTmEventsUk, getTmEventByIdUk } from "./ticketmaster";
+
 const app = express();
 const PORT = Number(process.env.PORT ?? 5000);
 
@@ -40,6 +42,58 @@ app.use((_req: Request, res: Response, next: NextFunction) => {
 
 // --- Routes ---
 // Optional upgrade: friendly root route so Replit Autoscale health checks pass (hits "/")
+
+app.delete("/gigs/:id", async (req, res) => {
+  const { id } = req.params;
+
+  const index = gigs.findIndex((g) => g.id === id);
+  if (index === -1) {
+    return res.status(404).json({ error: "Gig not found" });
+  }
+
+  const [deleted] = gigs.splice(index, 1);
+
+  try {
+    await db.set("gigs", gigs);
+  } catch (error) {
+    console.error("Error saving gigs after delete:", error);
+  }
+
+  return res.status(200).json({ deletedId: id, gig: deleted });
+});
+
+app.get("/tm/events/search", async (req: Request, res: Response) => {
+  try {
+    const { keyword, city, startDateTime, endDateTime, size } = req.query;
+
+    const data = await searchTmEventsUk({
+      keyword: typeof keyword === "string" ? keyword : undefined,
+      city: typeof city === "string" ? city : undefined,
+      startDateTime:
+        typeof startDateTime === "string" ? startDateTime : undefined,
+      endDateTime: typeof endDateTime === "string" ? endDateTime : undefined,
+      size: typeof size === "string" ? Number(size) : undefined,
+    });
+
+    return res.json(data);
+  } catch (e: any) {
+    return res
+      .status(500)
+      .json({ message: e?.message ?? "Ticketmaster search failed" });
+  }
+});
+
+app.get("/tm/events/:id", async (req: Request, res: Response) => {
+  try {
+    const data = await getTmEventByIdUk(req.params.id);
+    return res.json(data);
+  } catch (e: any) {
+    return res
+      .status(500)
+      .json({ message: e?.message ?? "Ticketmaster event lookup failed" });
+  }
+});
+
 app.get("/", (_req: Request, res: Response) => {
   res
     .status(200)
@@ -53,6 +107,10 @@ app.get("/health", (_req: Request, res: Response) => {
     message: "WeGig API is running",
     timestamp: new Date().toISOString(),
   });
+});
+
+app.get("/version", (_req, res) => {
+  res.json({ version: "wegig-api-2025-12-24-delete" });
 });
 
 app.get("/gigs", (_req: Request, res: Response) => {

@@ -34,4 +34,9 @@ externalPort = 80
 
 [deployment]
 deploymentTarget = "cloudrun"
-run = ["sh", "-c", "npm start"]
+run = ["sh", "-c", "npm run build && npm start"]
+
+[userenv]
+
+[userenv.shared]
+EXTERNAL_API_BASE = "https://we-gig-api--MrWeGig.replit.app"
