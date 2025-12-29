@@ -6,6 +6,10 @@ export interface Gig {
   date: string;
   rating?: number;
   notes?: string;
+
+  // ✅ Ticketmaster association (optional)
+  externalSource?: string; // e.g. "Ticketmaster"
+  externalId?: string; // Ticketmaster event id
 }
 
 export interface CreateGigInput {
@@ -15,4 +19,8 @@ export interface CreateGigInput {
   date: string;
   rating?: number;
   notes?: string;
+
+  // ✅ Ticketmaster association (optional)
+  externalSource?: string;
+  externalId?: string;
 }
