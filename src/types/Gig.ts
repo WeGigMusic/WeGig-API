@@ -1,6 +1,7 @@
 export interface Gig {
   id: string;
   artist: string;
+  artistMbid?: string; // NEW
   venue: string;
   city: string;
   date: string;
@@ -14,6 +15,7 @@ export interface Gig {
 
 export interface CreateGigInput {
   artist: string;
+  artistMbid?: string; // NEW
   venue: string;
   city: string;
   date: string;

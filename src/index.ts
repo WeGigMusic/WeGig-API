@@ -1,12 +1,11 @@
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import { randomUUID } from "crypto";
-import { searchMbArtists } from "./musicbrainz";
 
+import { searchMbArtists } from "./musicbrainz";
 import { Gig, CreateGigInput } from "./types/Gig";
 import { gigs } from "./data/gigsData";
 import db from "./db";
-
 import { searchTmEventsUk, getTmEventByIdUk } from "./ticketmaster";
 
 const app = express();
@@ -58,12 +57,9 @@ app.get("/health", (_req: Request, res: Response) => {
   });
 });
 
+// Keep ONE version route
 app.get("/version", (_req, res) => {
-  res.json({ version: "mb-route-test-2025-12-29-1" });
-});
-
-app.get("/version", (_req, res) => {
-  res.json({ version: "wegig-api-2025-12-28-edit" });
+  res.json({ version: "wegig-api-2025-12-29-artistmbid" });
 });
 
 app.get("/gigs", (_req: Request, res: Response) => {
@@ -72,14 +68,16 @@ app.get("/gigs", (_req: Request, res: Response) => {
 });
 
 app.post("/gigs", async (req: Request, res: Response) => {
-  // Allow extra optional fields for external association without breaking existing callers
+  // Extend input to allow optional fields without breaking existing callers
   const gigInput = req.body as CreateGigInput & {
     externalSource?: unknown;
     externalId?: unknown;
+    artistMbid?: unknown; // ✅ NEW
   };
 
   const errors: string[] = [];
 
+  // Required fields
   if (typeof gigInput.artist !== "string" || gigInput.artist.trim() === "") {
     errors.push("artist must be a non-empty string");
   }
@@ -99,22 +97,17 @@ app.post("/gigs", async (req: Request, res: Response) => {
     if (!dateRegex.test(gigInput.date.trim())) {
       errors.push("date must be in YYYY-MM-DD format");
     } else {
+      // validate real calendar date
       const dateStr = gigInput.date.trim();
       const parsedDate = new Date(dateStr + "T00:00:00Z");
       if (Number.isNaN(parsedDate.getTime())) {
         errors.push("date must be a valid date");
       } else {
-        const [inputYear, inputMonth, inputDay] = dateStr
-          .split("-")
-          .map(Number);
-        const actualYear = parsedDate.getUTCFullYear();
-        const actualMonth = parsedDate.getUTCMonth() + 1;
-        const actualDay = parsedDate.getUTCDate();
-
+        const [y, m, d] = dateStr.split("-").map(Number);
         if (
-          inputYear !== actualYear ||
-          inputMonth !== actualMonth ||
-          inputDay !== actualDay
+          y !== parsedDate.getUTCFullYear() ||
+          m !== parsedDate.getUTCMonth() + 1 ||
+          d !== parsedDate.getUTCDate()
         ) {
           errors.push("date must be a valid calendar date");
         }
@@ -122,6 +115,7 @@ app.post("/gigs", async (req: Request, res: Response) => {
     }
   }
 
+  // Optional fields
   if (gigInput.rating !== undefined && gigInput.rating !== null) {
     if (
       typeof gigInput.rating !== "number" ||
@@ -141,7 +135,21 @@ app.post("/gigs", async (req: Request, res: Response) => {
     errors.push("notes must be a string");
   }
 
-  // ✅ NEW: external association validation (optional)
+  // ✅ NEW: artistMbid validation (optional)
+  const artistMbid =
+    typeof gigInput.artistMbid === "string" && gigInput.artistMbid.trim() !== ""
+      ? gigInput.artistMbid.trim()
+      : undefined;
+
+  if (artistMbid) {
+    const uuidRegex =
+      /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!uuidRegex.test(artistMbid)) {
+      errors.push("artistMbid must be a valid UUID");
+    }
+  }
+
+  // Existing: external association validation (optional)
   const externalSource =
     typeof gigInput.externalSource === "string" &&
     gigInput.externalSource.trim() !== ""
@@ -153,7 +161,6 @@ app.post("/gigs", async (req: Request, res: Response) => {
       ? gigInput.externalId.trim()
       : undefined;
 
-  // If one is provided, require the other (prevents half-baked associations)
   if ((externalSource && !externalId) || (!externalSource && externalId)) {
     errors.push("externalSource and externalId must be provided together");
   }
@@ -164,14 +171,12 @@ app.post("/gigs", async (req: Request, res: Response) => {
       .json({ error: "Validation failed", details: errors });
   }
 
-  // ✅ NEW: dedupe for external imports (Ticketmaster association)
+  // Existing: dedupe for external imports
   if (externalSource && externalId) {
-    const already = gigs.find((g: any) => {
-      return (
-        g?.externalSource === externalSource && g?.externalId === externalId
-      );
-    });
-
+    const already = gigs.find(
+      (g: any) =>
+        g?.externalSource === externalSource && g?.externalId === externalId,
+    );
     if (already) {
       return res.status(409).json({
         message: "You’ve already logged this gig.",
@@ -180,16 +185,25 @@ app.post("/gigs", async (req: Request, res: Response) => {
     }
   }
 
-  const newGig: Gig & { externalSource?: string; externalId?: string } = {
+  // ✅ IMPORTANT: make sure Gig type allows artistMbid (we’ll update Gig.ts next)
+  const newGig: Gig & {
+    externalSource?: string;
+    externalId?: string;
+    artistMbid?: string;
+  } = {
     id: randomUUID(),
     artist: gigInput.artist.trim(),
     venue: gigInput.venue.trim(),
     city: gigInput.city.trim(),
     date: gigInput.date.trim(),
     rating: gigInput.rating,
-    notes: gigInput.notes ? gigInput.notes.trim() : undefined,
+    notes:
+      typeof gigInput.notes === "string" ? gigInput.notes.trim() : undefined,
 
-    // ✅ NEW: save association fields
+    // ✅ NEW: persist mbid
+    artistMbid,
+
+    // Existing: persist association fields
     externalSource,
     externalId,
   };
@@ -198,7 +212,6 @@ app.post("/gigs", async (req: Request, res: Response) => {
 
   try {
     await db.set("gigs", gigs);
-    console.log(`Saved ${gigs.length} gigs to the database`);
   } catch (error) {
     console.error("Error saving gigs to DB:", error);
   }
@@ -207,20 +220,22 @@ app.post("/gigs", async (req: Request, res: Response) => {
 });
 
 /**
- * NEW: Edit gig (partial update)
+ * Edit gig (partial update)
  * PATCH /gigs/:id
  */
 app.patch("/gigs/:id", async (req: Request, res: Response) => {
   const { id } = req.params;
 
   const index = gigs.findIndex((g) => g.id === id);
-  if (index === -1) {
-    return res.status(404).json({ error: "Gig not found" });
-  }
+  if (index === -1) return res.status(404).json({ error: "Gig not found" });
 
   const existing = gigs[index] as any;
 
-  const next: Gig & { externalSource?: string; externalId?: string } = {
+  const next: Gig & {
+    externalSource?: string;
+    externalId?: string;
+    artistMbid?: string;
+  } = {
     ...existing,
     artist:
       typeof req.body.artist === "string"
@@ -240,22 +255,19 @@ app.patch("/gigs/:id", async (req: Request, res: Response) => {
         ? req.body.notes.trim()
         : existing.notes,
 
-    // Keep association fields as-is (we don’t allow editing these via PATCH right now)
+    // keep association/mbid as-is for now
     externalSource: existing.externalSource,
     externalId: existing.externalId,
+    artistMbid: existing.artistMbid,
   };
 
   const errors: string[] = [];
-
   if (!next.artist?.trim()) errors.push("artist must be a non-empty string");
   if (!next.venue?.trim()) errors.push("venue must be a non-empty string");
   if (!next.city?.trim()) errors.push("city must be a non-empty string");
-
-  if (!next.date?.trim()) {
-    errors.push("date must be a non-empty string");
-  } else if (!/^\d{4}-\d{2}-\d{2}$/.test(next.date)) {
+  if (!next.date?.trim()) errors.push("date must be a non-empty string");
+  else if (!/^\d{4}-\d{2}-\d{2}$/.test(next.date))
     errors.push("date must be in YYYY-MM-DD format");
-  }
 
   if (next.rating !== undefined && next.rating !== null) {
     if (
@@ -268,11 +280,10 @@ app.patch("/gigs/:id", async (req: Request, res: Response) => {
     }
   }
 
-  if (errors.length > 0) {
+  if (errors.length > 0)
     return res
       .status(400)
       .json({ error: "Validation failed", details: errors });
-  }
 
   gigs[index] = next;
 
@@ -289,9 +300,7 @@ app.delete("/gigs/:id", async (req, res) => {
   const { id } = req.params;
 
   const index = gigs.findIndex((g) => g.id === id);
-  if (index === -1) {
-    return res.status(404).json({ error: "Gig not found" });
-  }
+  if (index === -1) return res.status(404).json({ error: "Gig not found" });
 
   const [deleted] = gigs.splice(index, 1);
 
@@ -336,24 +345,30 @@ app.get("/tm/events/:id", async (req: Request, res: Response) => {
       .json({ message: e?.message ?? "Ticketmaster event lookup failed" });
   }
 });
+
+// MusicBrainz
 app.get("/mb/artists/search", async (req, res) => {
   try {
     const q = String(req.query.q ?? "").trim();
     const limit = req.query.limit != null ? Number(req.query.limit) : undefined;
 
-    if (!q) {
+    if (!q)
       return res
         .status(400)
         .json({ message: "Missing required query param: q" });
-    }
 
     const result = await searchMbArtists({ q, limit });
     return res.json(result);
   } catch (err: any) {
     console.error("MusicBrainz search error:", err);
+    console.error("MusicBrainz search error cause:", err?.cause);
+
     return res.status(502).json({
       message: "Failed to fetch from MusicBrainz",
       detail: err?.message ?? String(err),
+      cause: err?.cause ? String(err.cause) : undefined,
+      name: err?.name,
+      code: err?.cause?.code ?? err?.code,
     });
   }
 });
@@ -366,6 +381,4 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`WeGig API server running on port ${PORT}`);
-  console.log(`Health check: http://localhost:${PORT}/health`);
-  console.log(`Gigs endpoint: http://localhost:${PORT}/gigs`);
 });
