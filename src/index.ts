@@ -1,15 +1,23 @@
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
 import { randomUUID } from "crypto";
+import "dotenv/config";
 
 import { searchMbArtists } from "./musicbrainz";
 import { Gig, CreateGigInput } from "./types/Gig";
 import { gigs } from "./data/gigsData";
 import db from "./db";
-import { searchTmEventsUk, getTmEventByIdUk } from "./ticketmaster";
+import {
+  searchTmEventsUk,
+  getTmEventByIdUk,
+  searchTmVenuesUk,
+} from "./ticketmaster";
 
 const app = express();
-const PORT = Number(process.env.PORT ?? 5000);
+const PORT = Number(process.env.PORT ?? 5050);
+
+// ✅ Replit DB is only available on Replit (or if you set REPLIT_DB_URL yourself)
+const isReplitDbAvailable = Boolean(process.env.REPLIT_DB_URL);
 
 // --- Startup: load persisted gigs (non-blocking) ---
 async function loadGigsFromDB() {
@@ -28,7 +36,13 @@ async function loadGigsFromDB() {
     console.error("Error loading gigs from DB:", error);
   }
 }
-void loadGigsFromDB();
+
+// ✅ Only attempt DB load if Replit DB is actually available
+if (isReplitDbAvailable) {
+  void loadGigsFromDB();
+} else {
+  console.log("Local dev: REPLIT_DB_URL not set, using in-memory gigs only");
+}
 
 // --- Middleware ---
 app.use(cors());
@@ -185,7 +199,6 @@ app.post("/gigs", async (req: Request, res: Response) => {
     }
   }
 
-  // ✅ IMPORTANT: make sure Gig type allows artistMbid (we’ll update Gig.ts next)
   const newGig: Gig & {
     externalSource?: string;
     externalId?: string;
@@ -199,11 +212,7 @@ app.post("/gigs", async (req: Request, res: Response) => {
     rating: gigInput.rating,
     notes:
       typeof gigInput.notes === "string" ? gigInput.notes.trim() : undefined,
-
-    // ✅ NEW: persist mbid
     artistMbid,
-
-    // Existing: persist association fields
     externalSource,
     externalId,
   };
@@ -211,7 +220,9 @@ app.post("/gigs", async (req: Request, res: Response) => {
   gigs.push(newGig);
 
   try {
-    await db.set("gigs", gigs);
+    if (isReplitDbAvailable) {
+      await db.set("gigs", gigs);
+    }
   } catch (error) {
     console.error("Error saving gigs to DB:", error);
   }
@@ -254,8 +265,6 @@ app.patch("/gigs/:id", async (req: Request, res: Response) => {
       typeof req.body.notes === "string"
         ? req.body.notes.trim()
         : existing.notes,
-
-    // keep association/mbid as-is for now
     externalSource: existing.externalSource,
     externalId: existing.externalId,
     artistMbid: existing.artistMbid,
@@ -288,7 +297,9 @@ app.patch("/gigs/:id", async (req: Request, res: Response) => {
   gigs[index] = next;
 
   try {
-    await db.set("gigs", gigs);
+    if (isReplitDbAvailable) {
+      await db.set("gigs", gigs);
+    }
   } catch (error) {
     console.error("Error saving gigs after patch:", error);
   }
@@ -305,7 +316,9 @@ app.delete("/gigs/:id", async (req, res) => {
   const [deleted] = gigs.splice(index, 1);
 
   try {
-    await db.set("gigs", gigs);
+    if (isReplitDbAvailable) {
+      await db.set("gigs", gigs);
+    }
   } catch (error) {
     console.error("Error saving gigs after delete:", error);
   }
@@ -313,13 +326,20 @@ app.delete("/gigs/:id", async (req, res) => {
   return res.status(200).json({ deletedId: id, gig: deleted });
 });
 
-// Ticketmaster
+// Ticketmaster (accept q OR keyword)
 app.get("/tm/events/search", async (req: Request, res: Response) => {
   try {
-    const { keyword, city, startDateTime, endDateTime, size } = req.query;
+    const { q, keyword, city, startDateTime, endDateTime, size } = req.query;
+
+    const kw =
+      typeof q === "string"
+        ? q
+        : typeof keyword === "string"
+          ? keyword
+          : undefined;
 
     const data = await searchTmEventsUk({
-      keyword: typeof keyword === "string" ? keyword : undefined,
+      keyword: kw,
       city: typeof city === "string" ? city : undefined,
       startDateTime:
         typeof startDateTime === "string" ? startDateTime : undefined,
@@ -343,6 +363,28 @@ app.get("/tm/events/:id", async (req: Request, res: Response) => {
     return res
       .status(500)
       .json({ message: e?.message ?? "Ticketmaster event lookup failed" });
+  }
+});
+
+// Ticketmaster Venues
+app.get("/tm/venues/search", async (req: Request, res: Response) => {
+  try {
+    const { q, keyword, city, size } = req.query;
+
+    const query =
+      typeof q === "string" ? q : typeof keyword === "string" ? keyword : "";
+
+    const data = await searchTmVenuesUk({
+      q: query,
+      city: typeof city === "string" ? city : undefined,
+      size: typeof size === "string" ? Number(size) : undefined,
+    });
+
+    return res.json(data);
+  } catch (e: any) {
+    return res
+      .status(500)
+      .json({ message: e?.message ?? "Ticketmaster venue search failed" });
   }
 });
 

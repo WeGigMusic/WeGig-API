@@ -123,3 +123,56 @@ export async function getTmEventByIdUk(eventId: string) {
 
   return json;
 }
+
+export async function searchTmVenuesUk(input: {
+  q: string;
+  city?: string;
+  size?: number;
+}) {
+  const apiKey = requireApiKey();
+  const countryCode = process.env.TICKETMASTER_COUNTRY_CODE || "GB";
+
+  const q = (input.q ?? "").trim();
+  if (!q) return { venues: [] };
+
+  const size = input.size ?? 8;
+
+  const query = buildQuery({
+    apikey: apiKey,
+    countryCode,
+    keyword: q,
+    city: input.city,
+    size,
+  });
+
+  const cacheKey = `tm:venues:${query}`;
+  const cached = getCache<any>(cacheKey);
+  if (cached) return cached;
+
+  const url = `${TM_BASE}/venues.json?${query}`;
+  const res = await fetch(url);
+
+  if (!res.ok) {
+    const text = await res.text().catch(() => "");
+    throw new Error(
+      `Ticketmaster error ${res.status}: ${text || res.statusText}`,
+    );
+  }
+
+  const json = await res.json();
+
+  const venues =
+    (json?._embedded?.venues ?? []).map((v: any) => ({
+      id: v?.id,
+      name: v?.name,
+      city: v?.city?.name ?? null,
+      countryCode: v?.country?.countryCode ?? null,
+    })) ?? [];
+
+  const payload = { venues };
+
+  // Cache venues longer (tune later)
+  setCache(cacheKey, payload, 60 * 60 * 1000);
+
+  return payload;
+}
