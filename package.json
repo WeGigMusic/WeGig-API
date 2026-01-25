@@ -3,6 +3,11 @@
   "version": "1.0.0",
   "main": "dist/index.js",
   "license": "MIT",
+
+  "engines": {
+  "node": "20.x"
+}
+
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
     "build": "tsc -p tsconfig.json",
@@ -11,6 +16,7 @@
   "dependencies": {
     "@replit/database": "^2.0.0",
     "cors": "^2.8.5",
+    "dotenv": "^17.2.3",
     "express": "^4.19.2"
   },
   "devDependencies": {
