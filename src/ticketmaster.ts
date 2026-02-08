@@ -72,8 +72,18 @@ export async function searchTmEventsUk(input: {
     startDateTime: input.startDateTime,
     endDateTime: input.endDateTime,
     size,
-    sort: "date,asc",
+
+    // ✅ Option 3: keep results music-focused
+    classificationName: "music",
+
+    // ✅ Better matching for partial queries like "Cold"
+    includeFuzzy: "yes",
+    includeSpellcheck: "yes",
+
+    // ✅ Use relevance when searching, otherwise keep date sort
+    sort: input.keyword?.trim() ? "relevance,desc" : "date,asc",
   });
+
 
   const cacheKey = `tm:search:${query}`;
   const cached = getCache<any>(cacheKey);
