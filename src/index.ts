@@ -82,11 +82,15 @@ app.get("/gigs", (_req: Request, res: Response) => {
 });
 
 app.post("/gigs", async (req: Request, res: Response) => {
-  // Extend input to allow optional fields without breaking existing callers
   const gigInput = req.body as CreateGigInput & {
     externalSource?: unknown;
     externalId?: unknown;
-    artistMbid?: unknown; // ✅ NEW
+    artistMbid?: unknown;
+    ticketUrl?: unknown;
+    venueLatitude?: unknown;
+    venueLongitude?: unknown;
+    venuePlaceName?: unknown;
+    venueMapboxId?: unknown;
   };
 
   const errors: string[] = [];
@@ -111,7 +115,6 @@ app.post("/gigs", async (req: Request, res: Response) => {
     if (!dateRegex.test(gigInput.date.trim())) {
       errors.push("date must be in YYYY-MM-DD format");
     } else {
-      // validate real calendar date
       const dateStr = gigInput.date.trim();
       const parsedDate = new Date(dateStr + "T00:00:00Z");
       if (Number.isNaN(parsedDate.getTime())) {
@@ -149,7 +152,6 @@ app.post("/gigs", async (req: Request, res: Response) => {
     errors.push("notes must be a string");
   }
 
-  // ✅ NEW: artistMbid validation (optional)
   const artistMbid =
     typeof gigInput.artistMbid === "string" && gigInput.artistMbid.trim() !== ""
       ? gigInput.artistMbid.trim()
@@ -163,7 +165,6 @@ app.post("/gigs", async (req: Request, res: Response) => {
     }
   }
 
-  // Existing: external association validation (optional)
   const externalSource =
     typeof gigInput.externalSource === "string" &&
     gigInput.externalSource.trim() !== ""
@@ -179,13 +180,62 @@ app.post("/gigs", async (req: Request, res: Response) => {
     errors.push("externalSource and externalId must be provided together");
   }
 
+  const ticketUrl =
+    typeof gigInput.ticketUrl === "string" && gigInput.ticketUrl.trim() !== ""
+      ? gigInput.ticketUrl.trim()
+      : undefined;
+
+  const venueLatitude =
+    typeof gigInput.venueLatitude === "number" &&
+    Number.isFinite(gigInput.venueLatitude)
+      ? gigInput.venueLatitude
+      : undefined;
+
+  const venueLongitude =
+    typeof gigInput.venueLongitude === "number" &&
+    Number.isFinite(gigInput.venueLongitude)
+      ? gigInput.venueLongitude
+      : undefined;
+
+  const venuePlaceName =
+    typeof gigInput.venuePlaceName === "string" &&
+    gigInput.venuePlaceName.trim() !== ""
+      ? gigInput.venuePlaceName.trim()
+      : undefined;
+
+  const venueMapboxId =
+    typeof gigInput.venueMapboxId === "string" &&
+    gigInput.venueMapboxId.trim() !== ""
+      ? gigInput.venueMapboxId.trim()
+      : undefined;
+
+  if (
+    (venueLatitude !== undefined && venueLongitude === undefined) ||
+    (venueLatitude === undefined && venueLongitude !== undefined)
+  ) {
+    errors.push("venueLatitude and venueLongitude must be provided together");
+  }
+
+  if (
+    venueLatitude !== undefined &&
+    (venueLatitude < -90 || venueLatitude > 90)
+  ) {
+    errors.push("venueLatitude must be between -90 and 90");
+  }
+
+  if (
+    venueLongitude !== undefined &&
+    (venueLongitude < -180 || venueLongitude > 180)
+  ) {
+    errors.push("venueLongitude must be between -180 and 180");
+  }
+
   if (errors.length > 0) {
     return res
       .status(400)
       .json({ error: "Validation failed", details: errors });
   }
 
-  // Existing: dedupe for external imports
   if (externalSource && externalId) {
     const already = gigs.find(
       (g: any) =>
@@ -199,11 +249,7 @@ app.post("/gigs", async (req: Request, res: Response) => {
     }
   }
 
-  const newGig: Gig & {
-    externalSource?: string;
-    externalId?: string;
-    artistMbid?: string;
-  } = {
+  const newGig: Gig = {
     id: randomUUID(),
     artist: gigInput.artist.trim(),
     venue: gigInput.venue.trim(),
@@ -215,6 +261,11 @@ app.post("/gigs", async (req: Request, res: Response) => {
     artistMbid,
     externalSource,
     externalId,
+    ticketUrl,
+    venueLatitude,
+    venueLongitude,
+    venuePlaceName,
+    venueMapboxId,
   };
 
   gigs.push(newGig);
@@ -240,13 +291,9 @@ app.patch("/gigs/:id", async (req: Request, res: Response) => {
   const index = gigs.findIndex((g) => g.id === id);
   if (index === -1) return res.status(404).json({ error: "Gig not found" });
 
-  const existing = gigs[index] as any;
+  const existing = gigs[index] as Gig;
 
-  const next: Gig & {
-    externalSource?: string;
-    externalId?: string;
-    artistMbid?: string;
-  } = {
+  const next: Gig = {
     ...existing,
     artist:
       typeof req.body.artist === "string"
@@ -268,6 +315,26 @@ app.patch("/gigs/:id", async (req: Request, res: Response) => {
     externalSource: existing.externalSource,
     externalId: existing.externalId,
     artistMbid: existing.artistMbid,
+    ticketUrl:
+      typeof req.body.ticketUrl === "string"
+        ? req.body.ticketUrl.trim()
+        : existing.ticketUrl,
+    venueLatitude:
+      typeof req.body.venueLatitude === "number"
+        ? req.body.venueLatitude
+        : existing.venueLatitude,
+    venueLongitude:
+      typeof req.body.venueLongitude === "number"
+        ? req.body.venueLongitude
+        : existing.venueLongitude,
+    venuePlaceName:
+      typeof req.body.venuePlaceName === "string"
+        ? req.body.venuePlaceName.trim()
+        : existing.venuePlaceName,
+    venueMapboxId:
+      typeof req.body.venueMapboxId === "string"
+        ? req.body.venueMapboxId.trim()
+        : existing.venueMapboxId,
   };
 
   const errors: string[] = [];
@@ -275,8 +342,9 @@ app.patch("/gigs/:id", async (req: Request, res: Response) => {
   if (!next.venue?.trim()) errors.push("venue must be a non-empty string");
   if (!next.city?.trim()) errors.push("city must be a non-empty string");
   if (!next.date?.trim()) errors.push("date must be a non-empty string");
-  else if (!/^\d{4}-\d{2}-\d{2}$/.test(next.date))
+  else if (!/^\d{4}-\d{2}-\d{2}$/.test(next.date)) {
     errors.push("date must be in YYYY-MM-DD format");
+  }
 
   if (next.rating !== undefined && next.rating !== null) {
     if (
@@ -289,10 +357,32 @@ app.patch("/gigs/:id", async (req: Request, res: Response) => {
     }
   }
 
-  if (errors.length > 0)
+  if (
+    (next.venueLatitude !== undefined && next.venueLongitude === undefined) ||
+    (next.venueLatitude === undefined && next.venueLongitude !== undefined)
+  ) {
+    errors.push("venueLatitude and venueLongitude must be provided together");
+  }
+
+  if (
+    next.venueLatitude !== undefined &&
+    (next.venueLatitude < -90 || next.venueLatitude > 90)
+  ) {
+    errors.push("venueLatitude must be between -90 and 90");
+  }
+
+  if (
+    next.venueLongitude !== undefined &&
+    (next.venueLongitude < -180 || next.venueLongitude > 180)
+  ) {
+    errors.push("venueLongitude must be between -180 and 180");
+  }
+
+  if (errors.length > 0) {
     return res
       .status(400)
       .json({ error: "Validation failed", details: errors });
+  }
 
   gigs[index] = next;
 
@@ -394,10 +484,11 @@ app.get("/mb/artists/search", async (req, res) => {
     const q = String(req.query.q ?? "").trim();
     const limit = req.query.limit != null ? Number(req.query.limit) : undefined;
 
-    if (!q)
+    if (!q) {
       return res
         .status(400)
         .json({ message: "Missing required query param: q" });
+    }
 
     const result = await searchMbArtists({ q, limit });
     return res.json(result);

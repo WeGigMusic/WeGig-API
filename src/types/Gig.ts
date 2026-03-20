@@ -1,28 +1,38 @@
 export interface Gig {
   id: string;
   artist: string;
-  artistMbid?: string; // NEW
+  artistMbid?: string;
   venue: string;
   city: string;
   date: string;
   rating?: number;
   notes?: string;
 
-  // ✅ Ticketmaster association (optional)
-  externalSource?: string; // e.g. "Ticketmaster"
-  externalId?: string; // Ticketmaster event id
+  externalSource?: string;
+  externalId?: string;
+  ticketUrl?: string;
+
+  venueLatitude?: number;
+  venueLongitude?: number;
+  venuePlaceName?: string;
+  venueMapboxId?: string;
 }
 
 export interface CreateGigInput {
   artist: string;
-  artistMbid?: string; // NEW
+  artistMbid?: string;
   venue: string;
   city: string;
   date: string;
   rating?: number;
   notes?: string;
 
-  // ✅ Ticketmaster association (optional)
   externalSource?: string;
   externalId?: string;
+  ticketUrl?: string;
+
+  venueLatitude?: number;
+  venueLongitude?: number;
+  venuePlaceName?: string;
+  venueMapboxId?: string;
 }
