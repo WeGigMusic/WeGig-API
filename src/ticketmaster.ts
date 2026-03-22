@@ -1,3 +1,6 @@
+import { env } from "./env";
+import type { NormalizedEvent } from "./types/Event";
+
 type CacheEntry<T> = { value: T; expiresAt: number };
 
 const cache = new Map<string, CacheEntry<any>>();
@@ -27,12 +30,6 @@ function buildQuery(params: Record<string, string | number | undefined>) {
 
 const TM_BASE = "https://app.ticketmaster.com/discovery/v2";
 
-function requireApiKey() {
-  const key = process.env.TICKETMASTER_API_KEY;
-  if (!key) throw new Error("Missing TICKETMASTER_API_KEY secret");
-  return key;
-}
-
 export type TmEventSummary = {
   id: string;
   name: string;
@@ -55,12 +52,12 @@ export type TmEventSummary = {
 export async function searchTmEventsUk(input: {
   keyword?: string;
   city?: string;
-  startDateTime?: string; // ISO e.g. 2025-01-01T00:00:00Z
-  endDateTime?: string; // ISO
-  size?: number; // default 20
+  startDateTime?: string;
+  endDateTime?: string;
+  size?: number;
 }) {
-  const apiKey = requireApiKey();
-  const countryCode = process.env.TICKETMASTER_COUNTRY_CODE || "GB";
+  const apiKey = env.ticketmasterApiKey;
+  const countryCode = env.ticketmasterCountryCode;
 
   const size = input.size ?? 20;
 
@@ -72,18 +69,11 @@ export async function searchTmEventsUk(input: {
     startDateTime: input.startDateTime,
     endDateTime: input.endDateTime,
     size,
-
-    // ✅ Option 3: keep results music-focused
     classificationName: "music",
-
-    // ✅ Better matching for partial queries like "Cold"
     includeFuzzy: "yes",
     includeSpellcheck: "yes",
-
-    // ✅ Use relevance when searching, otherwise keep date sort
     sort: input.keyword?.trim() ? "relevance,desc" : "date,asc",
   });
-
 
   const cacheKey = `tm:search:${query}`;
   const cached = getCache<any>(cacheKey);
@@ -101,15 +91,14 @@ export async function searchTmEventsUk(input: {
 
   const json = await res.json();
 
-  // Cache for 30 minutes (tune later)
   setCache(cacheKey, json, 30 * 60 * 1000);
 
   return json;
 }
 
 export async function getTmEventByIdUk(eventId: string) {
-  const apiKey = requireApiKey();
-  const countryCode = process.env.TICKETMASTER_COUNTRY_CODE || "GB";
+  const apiKey = env.ticketmasterApiKey;
+  const countryCode = env.ticketmasterCountryCode;
 
   const query = buildQuery({ apikey: apiKey, countryCode });
   const cacheKey = `tm:event:${eventId}:${query}`;
@@ -128,7 +117,6 @@ export async function getTmEventByIdUk(eventId: string) {
 
   const json = await res.json();
 
-  // Cache event details for 24 hours
   setCache(cacheKey, json, 24 * 60 * 60 * 1000);
 
   return json;
@@ -139,10 +127,10 @@ export async function searchTmVenuesUk(input: {
   city?: string;
   size?: number;
 }) {
-  const apiKey = requireApiKey();
-  const countryCode = process.env.TICKETMASTER_COUNTRY_CODE || "GB";
+  const apiKey = env.ticketmasterApiKey;
+  const countryCode = env.ticketmasterCountryCode;
 
-  const q = (input.q ?? "").trim();
+  const q = input.q.trim();
   if (!q) return { venues: [] };
 
   const size = input.size ?? 8;
@@ -181,8 +169,44 @@ export async function searchTmVenuesUk(input: {
 
   const payload = { venues };
 
-  // Cache venues longer (tune later)
   setCache(cacheKey, payload, 60 * 60 * 1000);
 
   return payload;
+}
+
+function mapTmEventToNormalized(event: any): NormalizedEvent {
+  const venue = event?._embedded?.venues?.[0];
+  const attractions = event?._embedded?.attractions ?? [];
+
+  return {
+    source: "ticketmaster",
+    sourceEventId: String(event?.id ?? ""),
+    title: String(event?.name ?? ""),
+    date: event?.dates?.start?.localDate,
+    time: event?.dates?.start?.localTime,
+    dateTime: event?.dates?.start?.dateTime,
+    status: event?.dates?.status?.code,
+    ticketUrl: event?.url,
+    venueName: venue?.name,
+    city: venue?.city?.name,
+    countryCode: venue?.country?.countryCode,
+    artists: attractions
+      .filter((a: any) => a?.name)
+      .map((a: any) => ({
+        id: a?.id,
+        name: a?.name,
+      })),
+  };
+}
+
+export async function searchTmEventsNormalized(input: {
+  keyword?: string;
+  city?: string;
+  startDateTime?: string;
+  endDateTime?: string;
+  size?: number;
+}) {
+  const raw = await searchTmEventsUk(input);
+  const events = raw?._embedded?.events?.map(mapTmEventToNormalized) ?? [];
+  return { events };
 }

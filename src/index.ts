@@ -7,8 +7,11 @@ import { searchMbArtists } from "./musicbrainz";
 import { Gig, CreateGigInput } from "./types/Gig";
 import { gigs } from "./data/gigsData";
 import db from "./db";
+import { dedupeEvents } from "./utils/dedupeEvents";
+import { searchSkiddleEventsNormalized } from "./skiddle";
 import {
   searchTmEventsUk,
+  searchTmEventsNormalized,
   getTmEventByIdUk,
   searchTmVenuesUk,
 } from "./ticketmaster";
@@ -16,10 +19,8 @@ import {
 const app = express();
 const PORT = Number(process.env.PORT ?? 5050);
 
-// ✅ Replit DB is only available on Replit (or if you set REPLIT_DB_URL yourself)
 const isReplitDbAvailable = Boolean(process.env.REPLIT_DB_URL);
 
-// --- Startup: load persisted gigs (non-blocking) ---
 async function loadGigsFromDB() {
   try {
     const stored = await db.get("gigs");
@@ -37,14 +38,12 @@ async function loadGigsFromDB() {
   }
 }
 
-// ✅ Only attempt DB load if Replit DB is actually available
 if (isReplitDbAvailable) {
   void loadGigsFromDB();
 } else {
   console.log("Local dev: REPLIT_DB_URL not set, using in-memory gigs only");
 }
 
-// --- Middleware ---
 app.use(cors());
 app.use(express.json());
 
@@ -53,8 +52,6 @@ app.use((_req: Request, res: Response, next: NextFunction) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
   next();
 });
-
-// --- Routes ---
 
 app.get("/", (_req: Request, res: Response) => {
   res
@@ -71,7 +68,6 @@ app.get("/health", (_req: Request, res: Response) => {
   });
 });
 
-// Keep ONE version route
 app.get("/version", (_req, res) => {
   res.json({ version: "wegig-api-2025-12-29-artistmbid" });
 });
@@ -95,7 +91,6 @@ app.post("/gigs", async (req: Request, res: Response) => {
 
   const errors: string[] = [];
 
-  // Required fields
   if (typeof gigInput.artist !== "string" || gigInput.artist.trim() === "") {
     errors.push("artist must be a non-empty string");
   }
@@ -132,7 +127,6 @@ app.post("/gigs", async (req: Request, res: Response) => {
     }
   }
 
-  // Optional fields
   if (gigInput.rating !== undefined && gigInput.rating !== null) {
     if (
       typeof gigInput.rating !== "number" ||
@@ -281,10 +275,6 @@ app.post("/gigs", async (req: Request, res: Response) => {
   return res.status(201).json(newGig);
 });
 
-/**
- * Edit gig (partial update)
- * PATCH /gigs/:id
- */
 app.patch("/gigs/:id", async (req: Request, res: Response) => {
   const { id } = req.params;
 
@@ -416,7 +406,6 @@ app.delete("/gigs/:id", async (req, res) => {
   return res.status(200).json({ deletedId: id, gig: deleted });
 });
 
-// Ticketmaster (accept q OR keyword)
 app.get("/tm/events/search", async (req: Request, res: Response) => {
   try {
     const { q, keyword, city, startDateTime, endDateTime, size } = req.query;
@@ -440,8 +429,74 @@ app.get("/tm/events/search", async (req: Request, res: Response) => {
     return res.json(data);
   } catch (e: any) {
     return res
-      .status(500)
+      .status(502)
       .json({ message: e?.message ?? "Ticketmaster search failed" });
+  }
+});
+
+app.get("/discover/events", async (req: Request, res: Response) => {
+  try {
+    const { q, keyword, city, startDateTime, endDateTime, size } = req.query;
+
+    const kw =
+      typeof q === "string"
+        ? q
+        : typeof keyword === "string"
+          ? keyword
+          : undefined;
+
+    const tm = await searchTmEventsNormalized({
+      keyword: kw,
+      city: typeof city === "string" ? city : undefined,
+      startDateTime:
+        typeof startDateTime === "string" ? startDateTime : undefined,
+      endDateTime: typeof endDateTime === "string" ? endDateTime : undefined,
+      size: typeof size === "string" ? Number(size) : undefined,
+    });
+
+    const skiddle = await searchSkiddleEventsNormalized({
+      keyword: kw,
+    });
+
+    const merged = [...tm.events, ...skiddle.events];
+    const events = dedupeEvents(merged);
+
+    return res.json({ events });
+  } catch (e: any) {
+    return res.status(502).json({
+      message: e?.message ?? "Discover search failed",
+    });
+  }
+});
+
+app.get("/discover/events", async (req: Request, res: Response) => {
+  try {
+    const { q, keyword, city, startDateTime, endDateTime, size } = req.query;
+
+    const kw =
+      typeof q === "string"
+        ? q
+        : typeof keyword === "string"
+          ? keyword
+          : undefined;
+
+    const tm = await searchTmEventsNormalized({
+      keyword: kw,
+      city: typeof city === "string" ? city : undefined,
+      startDateTime:
+        typeof startDateTime === "string" ? startDateTime : undefined,
+      endDateTime: typeof endDateTime === "string" ? endDateTime : undefined,
+      size: typeof size === "string" ? Number(size) : undefined,
+    });
+
+    const merged = [...tm.events];
+    const events = dedupeEvents(merged);
+
+    return res.json({ events });
+  } catch (e: any) {
+    return res.status(502).json({
+      message: e?.message ?? "Discover search failed",
+    });
   }
 });
 
@@ -451,12 +506,11 @@ app.get("/tm/events/:id", async (req: Request, res: Response) => {
     return res.json(data);
   } catch (e: any) {
     return res
-      .status(500)
+      .status(502)
       .json({ message: e?.message ?? "Ticketmaster event lookup failed" });
   }
 });
 
-// Ticketmaster Venues
 app.get("/tm/venues/search", async (req: Request, res: Response) => {
   try {
     const { q, keyword, city, size } = req.query;
@@ -473,12 +527,11 @@ app.get("/tm/venues/search", async (req: Request, res: Response) => {
     return res.json(data);
   } catch (e: any) {
     return res
-      .status(500)
+      .status(502)
       .json({ message: e?.message ?? "Ticketmaster venue search failed" });
   }
 });
 
-// MusicBrainz
 app.get("/mb/artists/search", async (req, res) => {
   try {
     const q = String(req.query.q ?? "").trim();
@@ -506,7 +559,6 @@ app.get("/mb/artists/search", async (req, res) => {
   }
 });
 
-// Error handler
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error("Unhandled error:", err);
   res.status(500).json({ message: "Internal Server Error" });
