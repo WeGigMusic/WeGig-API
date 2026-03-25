@@ -4,6 +4,7 @@ import { randomUUID } from "crypto";
 import "dotenv/config";
 
 import { searchMbArtists } from "./musicbrainz";
+import { searchSpotifyArtist } from "./spotify";
 import { Gig, CreateGigInput } from "./types/Gig";
 import { gigs } from "./data/gigsData";
 import db from "./db";
@@ -69,7 +70,7 @@ app.get("/health", (_req: Request, res: Response) => {
 });
 
 app.get("/version", (_req, res) => {
-  res.json({ version: "wegig-api-2025-12-29-artistmbid" });
+  res.json({ version: "wegig-api-2026-03-25-spotify-artist" });
 });
 
 app.get("/gigs", (_req: Request, res: Response) => {
@@ -469,37 +470,6 @@ app.get("/discover/events", async (req: Request, res: Response) => {
   }
 });
 
-app.get("/discover/events", async (req: Request, res: Response) => {
-  try {
-    const { q, keyword, city, startDateTime, endDateTime, size } = req.query;
-
-    const kw =
-      typeof q === "string"
-        ? q
-        : typeof keyword === "string"
-          ? keyword
-          : undefined;
-
-    const tm = await searchTmEventsNormalized({
-      keyword: kw,
-      city: typeof city === "string" ? city : undefined,
-      startDateTime:
-        typeof startDateTime === "string" ? startDateTime : undefined,
-      endDateTime: typeof endDateTime === "string" ? endDateTime : undefined,
-      size: typeof size === "string" ? Number(size) : undefined,
-    });
-
-    const merged = [...tm.events];
-    const events = dedupeEvents(merged);
-
-    return res.json({ events });
-  } catch (e: any) {
-    return res.status(502).json({
-      message: e?.message ?? "Discover search failed",
-    });
-  }
-});
-
 app.get("/tm/events/:id", async (req: Request, res: Response) => {
   try {
     const data = await getTmEventByIdUk(req.params.id);
@@ -555,6 +525,23 @@ app.get("/mb/artists/search", async (req, res) => {
       cause: err?.cause ? String(err.cause) : undefined,
       name: err?.name,
       code: err?.cause?.code ?? err?.code,
+    });
+  }
+});
+
+app.get("/spotify/artist", async (req: Request, res: Response) => {
+  try {
+    const name = String(req.query.name ?? "").trim();
+
+    if (!name) {
+      return res.status(400).json({ message: "Missing artist name" });
+    }
+
+    const artist = await searchSpotifyArtist(name);
+    return res.json({ artist });
+  } catch (e: any) {
+    return res.status(502).json({
+      message: e?.message ?? "Spotify artist lookup failed",
     });
   }
 });
