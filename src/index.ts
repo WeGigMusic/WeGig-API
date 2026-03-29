@@ -4,7 +4,7 @@ import { randomUUID } from "crypto";
 import "dotenv/config";
 
 import { searchMbArtists } from "./musicbrainz";
-import { searchSpotifyArtist } from "./spotify";
+import { searchSpotifyArtist, getSpotifyArtistPage } from "./spotify";
 import { Gig, CreateGigInput } from "./types/Gig";
 import { gigs } from "./data/gigsData";
 import db from "./db";
@@ -70,7 +70,7 @@ app.get("/health", (_req: Request, res: Response) => {
 });
 
 app.get("/version", (_req, res) => {
-  res.json({ version: "wegig-api-2026-03-25-spotify-artist" });
+  res.json({ version: "wegig-api-2026-03-29-spotify-artist-page" });
 });
 
 app.get("/gigs", (_req: Request, res: Response) => {
@@ -542,6 +542,38 @@ app.get("/spotify/artist", async (req: Request, res: Response) => {
   } catch (e: any) {
     return res.status(502).json({
       message: e?.message ?? "Spotify artist lookup failed",
+    });
+  }
+});
+
+app.get("/spotify/artist-page", async (req: Request, res: Response) => {
+  try {
+    const name = String(req.query.name ?? "").trim();
+
+    console.log("[route] /spotify/artist-page hit", { name });
+
+    if (!name) {
+      return res.status(400).json({ message: "Missing artist name" });
+    }
+
+    const result = await getSpotifyArtistPage(name);
+
+    console.log("[route] /spotify/artist-page success", {
+      name,
+      hasArtist: Boolean(result.artist),
+      topTracks: result.topTracks.length,
+      releases: result.releases.length,
+    });
+
+    return res.json(result);
+  } catch (e: any) {
+    console.error("[route] /spotify/artist-page failed", {
+      name: String(req.query.name ?? "").trim(),
+      message: e?.message ?? String(e),
+    });
+
+    return res.status(502).json({
+      message: e?.message ?? "Spotify artist page lookup failed",
     });
   }
 });
