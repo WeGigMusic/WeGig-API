@@ -1,6 +1,8 @@
 import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
+import multer from "multer";
 import { randomUUID } from "crypto";
+import { unlink } from "fs/promises";
 import "dotenv/config";
 
 import { searchMbArtists } from "./musicbrainz";
@@ -16,11 +18,14 @@ import {
   getTmEventByIdUk,
   searchTmVenuesUk,
 } from "./ticketmaster";
+import { extractRawTextFromImage } from "./ocr";
+import { parseTicketText } from "./parseTicketText";
 
 const app = express();
 const PORT = Number(process.env.PORT ?? 5050);
 
 const isReplitDbAvailable = Boolean(process.env.REPLIT_DB_URL);
+const upload = multer({ dest: "tmp/" });
 
 async function loadGigsFromDB() {
   try {
@@ -406,6 +411,42 @@ app.delete("/gigs/:id", async (req, res) => {
 
   return res.status(200).json({ deletedId: id, gig: deleted });
 });
+
+app.post(
+  "/ocr/ticket",
+  upload.single("ticket"),
+  async (req: Request, res: Response) => {
+    const file = req.file;
+
+    if (!file) {
+      return res.status(400).json({ message: "No ticket image uploaded" });
+    }
+
+    try {
+      const rawText = await extractRawTextFromImage(file.path);
+      const parsed = parseTicketText(rawText);
+
+      return res.json({
+        rawText,
+        confidence: parsed.confidence,
+        prefill: {
+          artist: parsed.artist,
+          venue: parsed.venue,
+          city: parsed.city,
+          date: parsed.date,
+          notes: "Imported from ticket scan",
+        },
+      });
+    } catch (error: any) {
+      console.error("OCR route failed:", error);
+      return res.status(500).json({
+        message: error?.message ?? "OCR failed",
+      });
+    } finally {
+      await unlink(file.path).catch(() => {});
+    }
+  },
+);
 
 app.get("/tm/events/search", async (req: Request, res: Response) => {
   try {
