@@ -23,6 +23,10 @@ export const env = {
   // spotify
   spotifyClientId: required("SPOTIFY_CLIENT_ID"),
   spotifyClientSecret: required("SPOTIFY_CLIENT_SECRET"),
+
+  // optional for now
+  setlistFmApiKey: process.env.SETLISTFM_API_KEY || "",
+  lastFmApiKey: process.env.LASTFM_API_KEY || "",
 };
 
 export function requireMapboxToken() {

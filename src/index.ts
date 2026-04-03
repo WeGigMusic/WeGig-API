@@ -7,6 +7,8 @@ import "dotenv/config";
 
 import { searchMbArtists } from "./musicbrainz";
 import { searchSpotifyArtist, getSpotifyArtistPage } from "./spotify";
+import { searchSetlistsByArtist, matchSetlistToGig } from "./setlist";
+import { getLastFmSimilarArtists } from "./lastfm";
 import { Gig, CreateGigInput } from "./types/Gig";
 import { gigs } from "./data/gigsData";
 import db from "./db";
@@ -75,7 +77,7 @@ app.get("/health", (_req: Request, res: Response) => {
 });
 
 app.get("/version", (_req, res) => {
-  res.json({ version: "wegig-api-2026-03-29-spotify-artist-page" });
+  res.json({ version: "wegig-api-2026-04-03-setlist-gig-match" });
 });
 
 app.get("/gigs", (_req: Request, res: Response) => {
@@ -434,7 +436,7 @@ app.post(
           venue: parsed.venue,
           city: parsed.city,
           date: parsed.date,
-          notes: "Imported from ticket scan",
+          notes: undefined,
         },
       });
     } catch (error: any) {
@@ -615,6 +617,70 @@ app.get("/spotify/artist-page", async (req: Request, res: Response) => {
 
     return res.status(502).json({
       message: e?.message ?? "Spotify artist page lookup failed",
+    });
+  }
+});
+
+app.get("/setlist/artist", async (req: Request, res: Response) => {
+  try {
+    const artist = String(req.query.artist ?? "").trim();
+
+    if (!artist) {
+      return res.status(400).json({ message: "Missing artist" });
+    }
+
+    const setlists = await searchSetlistsByArtist(artist);
+    return res.json({ setlists });
+  } catch (e: any) {
+    return res.status(502).json({
+      message: e?.message ?? "Setlist lookup failed",
+    });
+  }
+});
+
+app.get("/setlist/gig-match", async (req: Request, res: Response) => {
+  try {
+    const artist = String(req.query.artist ?? "").trim();
+    const date = String(req.query.date ?? "").trim();
+    const city =
+      typeof req.query.city === "string" ? req.query.city.trim() : undefined;
+    const venue =
+      typeof req.query.venue === "string" ? req.query.venue.trim() : undefined;
+
+    if (!artist || !date) {
+      return res.status(400).json({
+        message: "Missing required params: artist and date",
+      });
+    }
+
+    const result = await matchSetlistToGig({
+      artist,
+      date,
+      city,
+      venue,
+    });
+
+    return res.json(result);
+  } catch (e: any) {
+    return res.status(502).json({
+      message: e?.message ?? "Gig setlist match failed",
+    });
+  }
+});
+
+app.get("/lastfm/similar-artists", async (req: Request, res: Response) => {
+  try {
+    const artist = String(req.query.artist ?? "").trim();
+
+    if (!artist) {
+      return res.status(400).json({ message: "Missing artist" });
+    }
+
+    const artists = await getLastFmSimilarArtists(artist);
+    return res.json({ artists });
+  } catch (e: any) {
+    return res.status(502).json({
+      message: e?.message ?? "Last.fm similar artists lookup failed",
     });
   }
 });
