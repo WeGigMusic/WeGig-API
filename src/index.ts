@@ -7,7 +7,11 @@ import "dotenv/config";
 
 import { searchMbArtists } from "./musicbrainz";
 import { searchSpotifyArtist, getSpotifyArtistPage } from "./spotify";
-import { searchSetlistsByArtist, matchSetlistToGig } from "./setlist";
+import {
+  searchSetlistsByArtist,
+  matchSetlistToGig,
+  SetlistServiceError,
+} from "./setlist";
 import { getLastFmSimilarArtists } from "./lastfm";
 import { Gig, CreateGigInput } from "./types/Gig";
 import { gigs } from "./data/gigsData";
@@ -626,14 +630,44 @@ app.get("/setlist/artist", async (req: Request, res: Response) => {
     const artist = String(req.query.artist ?? "").trim();
 
     if (!artist) {
-      return res.status(400).json({ message: "Missing artist" });
+      return res.status(400).json({
+        success: false,
+        code: "VALIDATION_ERROR",
+        message: "Missing artist",
+      });
     }
 
     const setlists = await searchSetlistsByArtist(artist);
-    return res.json({ setlists });
-  } catch (e: any) {
-    return res.status(502).json({
-      message: e?.message ?? "Setlist lookup failed",
+
+    return res.status(200).json({
+      success: true,
+      setlists,
+    });
+  } catch (error: unknown) {
+    if (error instanceof SetlistServiceError) {
+      console.error("Setlist artist lookup failed", {
+        code: error.code,
+        status: error.status,
+        message: error.message,
+        causeText: error.causeText,
+        query: {
+          artist: String(req.query.artist ?? "").trim(),
+        },
+      });
+
+      return res.status(503).json({
+        success: false,
+        code: "SETLIST_UNAVAILABLE",
+        message: "Unable to load setlists right now.",
+      });
+    }
+
+    console.error("Unexpected setlist artist lookup error:", error);
+
+    return res.status(500).json({
+      success: false,
+      code: "INTERNAL_ERROR",
+      message: "Something went wrong.",
     });
   }
 });
@@ -649,6 +683,8 @@ app.get("/setlist/gig-match", async (req: Request, res: Response) => {
 
     if (!artist || !date) {
       return res.status(400).json({
+        success: false,
+        code: "VALIDATION_ERROR",
         message: "Missing required params: artist and date",
       });
     }
@@ -660,10 +696,55 @@ app.get("/setlist/gig-match", async (req: Request, res: Response) => {
       venue,
     });
 
-    return res.json(result);
-  } catch (e: any) {
-    return res.status(502).json({
-      message: e?.message ?? "Gig setlist match failed",
+    if (!result.matched) {
+      return res.status(200).json({
+        success: true,
+        status: "no_match",
+        setlist: null,
+        confidence: 0,
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      status: "matched",
+      setlist: result.setlist,
+      confidence: result.confidence,
+    });
+  } catch (error: unknown) {
+    if (error instanceof SetlistServiceError) {
+      console.error("Gig setlist match failed", {
+        code: error.code,
+        status: error.status,
+        message: error.message,
+        causeText: error.causeText,
+        query: {
+          artist: String(req.query.artist ?? "").trim(),
+          date: String(req.query.date ?? "").trim(),
+          city:
+            typeof req.query.city === "string"
+              ? req.query.city.trim()
+              : undefined,
+          venue:
+            typeof req.query.venue === "string"
+              ? req.query.venue.trim()
+              : undefined,
+        },
+      });
+
+      return res.status(503).json({
+        success: false,
+        code: "SETLIST_UNAVAILABLE",
+        message: "Unable to load setlist right now.",
+      });
+    }
+
+    console.error("Unexpected gig setlist match error:", error);
+
+    return res.status(500).json({
+      success: false,
+      code: "INTERNAL_ERROR",
+      message: "Something went wrong.",
     });
   }
 });

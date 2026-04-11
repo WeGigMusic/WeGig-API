@@ -73,6 +73,31 @@ export type GigSetlistMatchResult = {
   setlist: SetlistItem | null;
 };
 
+export type SetlistServiceErrorCode =
+  | "SETLIST_NOT_FOUND"
+  | "SETLIST_UNAVAILABLE"
+  | "SETLIST_UNAUTHORIZED"
+  | "SETLIST_MISCONFIGURED";
+
+export class SetlistServiceError extends Error {
+  readonly code: SetlistServiceErrorCode;
+  readonly status: number;
+  readonly causeText?: string;
+
+  constructor(
+    code: SetlistServiceErrorCode,
+    status: number,
+    message: string,
+    causeText?: string,
+  ) {
+    super(message);
+    this.name = "SetlistServiceError";
+    this.code = code;
+    this.status = status;
+    this.causeText = causeText;
+  }
+}
+
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
 type CachedSetlistEntry = {
@@ -114,7 +139,11 @@ async function setlistGet<T>(
   query?: Record<string, string | number | undefined>,
 ): Promise<T> {
   if (!env.setlistFmApiKey) {
-    throw new Error("SETLISTFM_API_KEY is not configured");
+    throw new SetlistServiceError(
+      "SETLIST_MISCONFIGURED",
+      500,
+      "Setlist service is not configured.",
+    );
   }
 
   const url = new URL(`https://api.setlist.fm/rest/1.0${path}`);
@@ -132,12 +161,45 @@ async function setlistGet<T>(
     },
   });
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`Setlist.fm GET failed: ${res.status} ${path} ${text}`);
+  if (res.ok) {
+    return (await res.json()) as T;
   }
 
-  return (await res.json()) as T;
+  const text = await res.text().catch(() => "");
+
+  if (res.status === 404) {
+    throw new SetlistServiceError(
+      "SETLIST_NOT_FOUND",
+      404,
+      "No matching setlist found.",
+      text,
+    );
+  }
+
+  if (res.status === 401 || res.status === 403) {
+    throw new SetlistServiceError(
+      "SETLIST_UNAUTHORIZED",
+      502,
+      "Setlist provider authorization failed.",
+      text,
+    );
+  }
+
+  if (res.status === 429 || res.status >= 500) {
+    throw new SetlistServiceError(
+      "SETLIST_UNAVAILABLE",
+      503,
+      "Setlist provider is unavailable.",
+      text,
+    );
+  }
+
+  throw new SetlistServiceError(
+    "SETLIST_UNAVAILABLE",
+    502,
+    "Setlist request failed.",
+    text,
+  );
 }
 
 function toArray<T>(value: T | T[] | undefined | null): T[] {
@@ -295,20 +357,32 @@ export async function searchSetlistsByArtist(
     return cached;
   }
 
-  const json = await setlistGet<SetlistFmSearchResponse>("/search/setlists", {
-    artistName: query,
-    p: 1,
-  });
+  try {
+    const json = await setlistGet<SetlistFmSearchResponse>("/search/setlists", {
+      artistName: query,
+      p: 1,
+    });
 
-  const rawItems = toArray(json.setlist);
-  const mapped = rawItems
-    .map(mapSetlistItem)
-    .filter((item): item is SetlistItem => Boolean(item));
+    const rawItems = toArray(json.setlist);
+    const mapped = rawItems
+      .map(mapSetlistItem)
+      .filter((item): item is SetlistItem => Boolean(item));
 
-  const sorted = sortSetlists(mapped).slice(0, 8);
+    const sorted = sortSetlists(mapped).slice(0, 8);
 
-  setCached(query, sorted);
-  return sorted;
+    setCached(query, sorted);
+    return sorted;
+  } catch (error: unknown) {
+    if (
+      error instanceof SetlistServiceError &&
+      error.code === "SETLIST_NOT_FOUND"
+    ) {
+      setCached(query, []);
+      return [];
+    }
+
+    throw error;
+  }
 }
 
 export async function matchSetlistToGig(input: {

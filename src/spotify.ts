@@ -245,18 +245,101 @@ async function spotifyGet<T>(
   return (await res.json()) as T;
 }
 
+function tokenizeArtistName(value: string): string[] {
+  return normaliseArtistName(value)
+    .split(" ")
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
 function scoreArtistMatch(query: string, artist: SpotifyArtist): number {
   const q = normaliseArtistName(query);
   const name = normaliseArtistName(artist.name);
 
+  if (!q || !name) return 0;
+
+  const qTokens = tokenizeArtistName(query);
+  const nameTokens = tokenizeArtistName(artist.name);
+
+  const qJoined = qTokens.join(" ");
+  const nameJoined = nameTokens.join(" ");
+
   let score = 0;
 
-  if (name === q) score += 100;
-  if (name.startsWith(q)) score += 30;
-  if (name.includes(q)) score += 10;
-  score += (artist.popularity ?? 0) / 20;
+  if (nameJoined === qJoined) {
+    score += 1000;
+  }
+
+  if (name === q) {
+    score += 1000;
+  }
+
+  if (
+    qTokens.length === nameTokens.length &&
+    qTokens.every((token, index) => token === nameTokens[index])
+  ) {
+    score += 500;
+  }
+
+  const sharedTokenCount = qTokens.filter((token) =>
+    nameTokens.includes(token),
+  ).length;
+
+  if (sharedTokenCount > 0) {
+    score += sharedTokenCount * 80;
+  }
+
+  if (name.startsWith(q)) {
+    score += 120;
+  }
+
+  if (nameJoined.startsWith(qJoined)) {
+    score += 120;
+  }
+
+  if (qTokens.length > 1) {
+    const allQueryTokensPresent = qTokens.every((token) =>
+      nameTokens.includes(token),
+    );
+
+    if (allQueryTokensPresent) {
+      score += 220;
+    }
+  }
+
+  if (name.includes(q) && name !== q) {
+    score += 20;
+  }
+
+  if (q.includes(name) && name !== q) {
+    score += 10;
+  }
+
+  // popularity is only a weak tiebreaker now
+  score += Math.min((artist.popularity ?? 0) / 10, 8);
 
   return score;
+}
+
+function isStrongArtistMatch(query: string, artist: SpotifyArtist): boolean {
+  const q = normaliseArtistName(query);
+  const name = normaliseArtistName(artist.name);
+
+  if (!q || !name) return false;
+  if (q === name) return true;
+
+  const qTokens = tokenizeArtistName(query);
+  const nameTokens = tokenizeArtistName(artist.name);
+
+  const allQueryTokensPresent =
+    qTokens.length > 0 && qTokens.every((token) => nameTokens.includes(token));
+
+  if (allQueryTokensPresent && qTokens.length >= 2) {
+    return true;
+  }
+
+  const score = scoreArtistMatch(query, artist);
+  return score >= 240;
 }
 
 function mapSpotifyArtistResult(
@@ -288,9 +371,9 @@ function dedupeAlbums(albums: SpotifyAlbum[]): SpotifyAlbum[] {
   });
 }
 
-function dedupeTrackCandidates<T extends SpotifyAlbumTrack & { album: SpotifyAlbum }>(
-  tracks: T[],
-): T[] {
+function dedupeTrackCandidates<
+  T extends SpotifyAlbumTrack & { album: SpotifyAlbum; albumTrackNumber?: number },
+>(tracks: T[]): T[] {
   const seen = new Set<string>();
 
   return tracks.filter((track) => {
@@ -357,15 +440,43 @@ async function getBestMatchingSpotifyArtist(
   const json = await spotifyGet<SpotifySearchResponse>("/search", {
     q: query,
     type: "artist",
-    limit: 5,
+    limit: 8,
   });
 
   const artists = json.artists?.items ?? [];
   if (artists.length === 0) return null;
 
-  return [...artists].sort(
-    (a, b) => scoreArtistMatch(query, b) - scoreArtistMatch(query, a),
-  )[0];
+  const ranked = [...artists]
+    .map((artist) => ({
+      artist,
+      score: scoreArtistMatch(query, artist),
+    }))
+    .sort((a, b) => b.score - a.score);
+
+  console.log("[spotify] artist candidates", {
+    query,
+    candidates: ranked.map(({ artist, score }) => ({
+      name: artist.name,
+      id: artist.id,
+      popularity: artist.popularity ?? null,
+      score,
+    })),
+  });
+
+  const best = ranked[0];
+  if (!best) return null;
+
+  if (!isStrongArtistMatch(query, best.artist)) {
+    console.warn("[spotify] rejected weak artist match", {
+      query,
+      chosenName: best.artist.name,
+      chosenId: best.artist.id,
+      score: best.score,
+    });
+    return null;
+  }
+
+  return best.artist;
 }
 
 export async function searchSpotifyArtist(
