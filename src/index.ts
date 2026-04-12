@@ -33,6 +33,13 @@ const PORT = Number(process.env.PORT ?? 5050);
 const isReplitDbAvailable = Boolean(process.env.REPLIT_DB_URL);
 const upload = multer({ dest: "tmp/" });
 
+function norm(value: unknown): string {
+  return String(value ?? "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase();
+}
+
 async function loadGigsFromDB() {
   try {
     const stored = await db.get("gigs");
@@ -98,7 +105,7 @@ app.post("/gigs", async (req: Request, res: Response) => {
     venueLatitude?: unknown;
     venueLongitude?: unknown;
     venuePlaceName?: unknown;
-    venueMapboxId?: unknown;
+    venuePlaceId?: unknown;
   };
 
   const errors: string[] = [];
@@ -209,10 +216,10 @@ app.post("/gigs", async (req: Request, res: Response) => {
       ? gigInput.venuePlaceName.trim()
       : undefined;
 
-  const venueMapboxId =
-    typeof gigInput.venueMapboxId === "string" &&
-    gigInput.venueMapboxId.trim() !== ""
-      ? gigInput.venueMapboxId.trim()
+  const venuePlaceId =
+    typeof gigInput.venuePlaceId === "string" &&
+    gigInput.venuePlaceId.trim() !== ""
+      ? gigInput.venuePlaceId.trim()
       : undefined;
 
   if (
@@ -245,14 +252,54 @@ app.post("/gigs", async (req: Request, res: Response) => {
   if (externalSource && externalId) {
     const already = gigs.find(
       (g: any) =>
-        g?.externalSource === externalSource && g?.externalId === externalId,
+        norm(g?.externalSource) === norm(externalSource) &&
+        norm(g?.externalId) === norm(externalId),
     );
+
     if (already) {
       return res.status(409).json({
         message: "You’ve already logged this gig.",
         existingGigId: (already as any).id,
       });
     }
+  }
+
+  const normalizedArtist = norm(gigInput.artist);
+  const normalizedDate = norm(gigInput.date);
+  const normalizedVenue = norm(gigInput.venue);
+  const normalizedCity = norm(gigInput.city);
+
+  if (venuePlaceId) {
+    const alreadyByPlaceId = gigs.find((g: any) => {
+      return (
+        norm(g?.artist) === normalizedArtist &&
+        norm(g?.date) === normalizedDate &&
+        norm(g?.venuePlaceId) === norm(venuePlaceId)
+      );
+    });
+
+    if (alreadyByPlaceId) {
+      return res.status(409).json({
+        message: "You’ve already logged this gig.",
+        existingGigId: alreadyByPlaceId.id,
+      });
+    }
+  }
+
+  const alreadyByText = gigs.find((g: any) => {
+    return (
+      norm(g?.artist) === normalizedArtist &&
+      norm(g?.venue) === normalizedVenue &&
+      norm(g?.city) === normalizedCity &&
+      norm(g?.date) === normalizedDate
+    );
+  });
+
+  if (alreadyByText) {
+    return res.status(409).json({
+      message: "You’ve already logged this gig.",
+      existingGigId: alreadyByText.id,
+    });
   }
 
   const newGig: Gig = {
@@ -271,7 +318,7 @@ app.post("/gigs", async (req: Request, res: Response) => {
     venueLatitude,
     venueLongitude,
     venuePlaceName,
-    venueMapboxId,
+    venuePlaceId,
   };
 
   gigs.push(newGig);
@@ -333,10 +380,10 @@ app.patch("/gigs/:id", async (req: Request, res: Response) => {
       typeof req.body.venuePlaceName === "string"
         ? req.body.venuePlaceName.trim()
         : existing.venuePlaceName,
-    venueMapboxId:
-      typeof req.body.venueMapboxId === "string"
-        ? req.body.venueMapboxId.trim()
-        : existing.venueMapboxId,
+    venuePlaceId:
+      typeof req.body.venuePlaceId === "string"
+        ? req.body.venuePlaceId.trim()
+        : existing.venuePlaceId,
   };
 
   const errors: string[] = [];

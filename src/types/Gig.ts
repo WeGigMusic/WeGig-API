@@ -15,7 +15,7 @@ export interface Gig {
   venueLatitude?: number;
   venueLongitude?: number;
   venuePlaceName?: string;
-  venueMapboxId?: string;
+  venuePlaceId?: string;
 }
 
 export interface CreateGigInput {
@@ -34,5 +34,5 @@ export interface CreateGigInput {
   venueLatitude?: number;
   venueLongitude?: number;
   venuePlaceName?: string;
-  venueMapboxId?: string;
+  venuePlaceId?: string;
 }
