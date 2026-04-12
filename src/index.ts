@@ -433,6 +433,43 @@ app.patch("/gigs/:id", async (req: Request, res: Response) => {
       .json({ error: "Validation failed", details: errors });
   }
 
+  const duplicate = gigs.find((g) => {
+    if (g.id === id) return false;
+
+    const sameExternal =
+      norm(next.externalSource) &&
+      norm(next.externalId) &&
+      norm(g.externalSource) === norm(next.externalSource) &&
+      norm(g.externalId) === norm(next.externalId);
+
+    if (sameExternal) return true;
+
+    const samePlaceId =
+      norm(next.artist) &&
+      norm(next.date) &&
+      norm(next.venuePlaceId) &&
+      norm(g.artist) === norm(next.artist) &&
+      norm(g.date) === norm(next.date) &&
+      norm(g.venuePlaceId) === norm(next.venuePlaceId);
+
+    if (samePlaceId) return true;
+
+    const sameText =
+      norm(g.artist) === norm(next.artist) &&
+      norm(g.venue) === norm(next.venue) &&
+      norm(g.city) === norm(next.city) &&
+      norm(g.date) === norm(next.date);
+
+    return sameText;
+  });
+
+  if (duplicate) {
+    return res.status(409).json({
+      message: "This change would create a duplicate gig.",
+      existingGigId: duplicate.id,
+    });
+  }
+
   gigs[index] = next;
 
   try {
