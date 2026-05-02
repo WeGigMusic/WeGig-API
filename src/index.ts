@@ -5,6 +5,8 @@ import { randomUUID } from "crypto";
 import { unlink } from "fs/promises";
 import "dotenv/config";
 
+import prisma from "./prisma";
+import { requireAuth, type AuthedRequest } from "./auth";
 import { searchMbArtists } from "./musicbrainz";
 import { searchSpotifyArtist, getSpotifyArtistPage } from "./spotify";
 import {
@@ -14,8 +16,6 @@ import {
 } from "./setlist";
 import { getLastFmSimilarArtists } from "./lastfm";
 import { Gig, CreateGigInput } from "./types/Gig";
-import { gigs } from "./data/gigsData";
-import db from "./db";
 import { dedupeEvents } from "./utils/dedupeEvents";
 import { searchSkiddleEventsNormalized } from "./skiddle";
 import {
@@ -30,7 +30,6 @@ import { parseTicketText } from "./parseTicketText";
 const app = express();
 const PORT = Number(process.env.PORT ?? 5050);
 
-const isReplitDbAvailable = Boolean(process.env.REPLIT_DB_URL);
 const upload = multer({ dest: "tmp/" });
 
 function norm(value: unknown): string {
@@ -38,29 +37,6 @@ function norm(value: unknown): string {
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase();
-}
-
-async function loadGigsFromDB() {
-  try {
-    const stored = await db.get("gigs");
-
-    if (Array.isArray(stored) && stored.length > 0) {
-      gigs.length = 0;
-      gigs.push(...(stored as Gig[]));
-      console.log(`Loaded ${gigs.length} gigs from the database`);
-    } else {
-      await db.set("gigs", gigs);
-      console.log("No gigs found in DB – seeded with sample data");
-    }
-  } catch (error) {
-    console.error("Error loading gigs from DB:", error);
-  }
-}
-
-if (isReplitDbAvailable) {
-  void loadGigsFromDB();
-} else {
-  console.log("Local dev: REPLIT_DB_URL not set, using in-memory gigs only");
 }
 
 app.use(cors());
@@ -88,15 +64,46 @@ app.get("/health", (_req: Request, res: Response) => {
 });
 
 app.get("/version", (_req, res) => {
-  res.json({ version: "wegig-api-2026-04-03-setlist-gig-match" });
+  res.json({ version: "wegig-api-2026-04-22-auth-gigs" });
 });
 
-app.get("/gigs", (_req: Request, res: Response) => {
-  const sorted = [...gigs].sort((a, b) => b.date.localeCompare(a.date));
-  res.json({ count: sorted.length, gigs: sorted });
+app.get("/gigs", requireAuth, async (req: AuthedRequest, res: Response) => {
+  try {
+    const userId = req.user!.id;
+
+    const dbGigs = await prisma.gig.findMany({
+      where: { userId },
+      orderBy: [{ date: "desc" }, { createdAt: "desc" }],
+    });
+
+    const gigs: Gig[] = dbGigs.map((g) => ({
+      id: g.id,
+      artist: g.artist,
+      artistMbid: g.artistMbid ?? undefined,
+      venue: g.venue,
+      city: g.city,
+      date: g.date,
+      rating: g.rating ?? undefined,
+      notes: g.notes ?? undefined,
+      externalSource: g.externalSource ?? undefined,
+      externalId: g.externalId ?? undefined,
+      ticketUrl: g.ticketUrl ?? undefined,
+      venueLatitude: g.venueLatitude ?? undefined,
+      venueLongitude: g.venueLongitude ?? undefined,
+      venuePlaceName: g.venuePlaceName ?? undefined,
+      venuePlaceId: g.venuePlaceId ?? undefined,
+    }));
+
+    res.json({ count: gigs.length, gigs });
+  } catch (error) {
+    console.error("Error fetching gigs from Prisma:", error);
+    res.status(500).json({ error: "Failed to fetch gigs" });
+  }
 });
 
-app.post("/gigs", async (req: Request, res: Response) => {
+app.post("/gigs", requireAuth, async (req: AuthedRequest, res: Response) => {
+  const userId = req.user!.id;
+
   const gigInput = req.body as CreateGigInput & {
     externalSource?: unknown;
     externalId?: unknown;
@@ -249,258 +256,379 @@ app.post("/gigs", async (req: Request, res: Response) => {
       .json({ error: "Validation failed", details: errors });
   }
 
-  if (externalSource && externalId) {
-    const already = gigs.find(
-      (g: any) =>
-        norm(g?.externalSource) === norm(externalSource) &&
-        norm(g?.externalId) === norm(externalId),
-    );
-
-    if (already) {
-      return res.status(409).json({
-        message: "You’ve already logged this gig.",
-        existingGigId: (already as any).id,
+  try {
+    if (externalSource && externalId) {
+      const already = await prisma.gig.findFirst({
+        where: {
+          userId,
+          externalSource,
+          externalId,
+        },
       });
+
+      if (already) {
+        return res.status(409).json({
+          message: "You’ve already logged this gig.",
+          existingGigId: already.id,
+        });
+      }
     }
-  }
 
-  const normalizedArtist = norm(gigInput.artist);
-  const normalizedDate = norm(gigInput.date);
-  const normalizedVenue = norm(gigInput.venue);
-  const normalizedCity = norm(gigInput.city);
+    const normalizedArtist = norm(gigInput.artist);
+    const normalizedDate = norm(gigInput.date);
+    const normalizedVenue = norm(gigInput.venue);
+    const normalizedCity = norm(gigInput.city);
 
-  if (venuePlaceId) {
-    const alreadyByPlaceId = gigs.find((g: any) => {
+    if (venuePlaceId) {
+      const existingForArtistDate = await prisma.gig.findMany({
+        where: {
+          userId,
+          artist: gigInput.artist.trim(),
+          date: gigInput.date.trim(),
+        },
+      });
+
+      const alreadyByPlaceId = existingForArtistDate.find((g) => {
+        return (
+          norm(g.artist) === normalizedArtist &&
+          norm(g.date) === normalizedDate &&
+          norm(g.venuePlaceId) === norm(venuePlaceId)
+        );
+      });
+
+      if (alreadyByPlaceId) {
+        return res.status(409).json({
+          message: "You’ve already logged this gig.",
+          existingGigId: alreadyByPlaceId.id,
+        });
+      }
+    }
+
+    const existingForTextCheck = await prisma.gig.findMany({
+      where: {
+        userId,
+        artist: gigInput.artist.trim(),
+        date: gigInput.date.trim(),
+      },
+    });
+
+    const alreadyByText = existingForTextCheck.find((g) => {
       return (
-        norm(g?.artist) === normalizedArtist &&
-        norm(g?.date) === normalizedDate &&
-        norm(g?.venuePlaceId) === norm(venuePlaceId)
+        norm(g.artist) === normalizedArtist &&
+        norm(g.venue) === normalizedVenue &&
+        norm(g.city) === normalizedCity &&
+        norm(g.date) === normalizedDate
       );
     });
 
-    if (alreadyByPlaceId) {
+    if (alreadyByText) {
       return res.status(409).json({
         message: "You’ve already logged this gig.",
-        existingGigId: alreadyByPlaceId.id,
+        existingGigId: alreadyByText.id,
       });
     }
-  }
 
-  const alreadyByText = gigs.find((g: any) => {
-    return (
-      norm(g?.artist) === normalizedArtist &&
-      norm(g?.venue) === normalizedVenue &&
-      norm(g?.city) === normalizedCity &&
-      norm(g?.date) === normalizedDate
-    );
-  });
-
-  if (alreadyByText) {
-    return res.status(409).json({
-      message: "You’ve already logged this gig.",
-      existingGigId: alreadyByText.id,
+    const created = await prisma.gig.create({
+      data: {
+        id: randomUUID(),
+        userId,
+        artist: gigInput.artist.trim(),
+        venue: gigInput.venue.trim(),
+        city: gigInput.city.trim(),
+        date: gigInput.date.trim(),
+        rating: gigInput.rating ?? null,
+        notes:
+          typeof gigInput.notes === "string"
+            ? gigInput.notes.trim() || null
+            : null,
+        artistMbid: artistMbid ?? null,
+        externalSource: externalSource ?? null,
+        externalId: externalId ?? null,
+        ticketUrl: ticketUrl ?? null,
+        venueLatitude: venueLatitude ?? null,
+        venueLongitude: venueLongitude ?? null,
+        venuePlaceName: venuePlaceName ?? null,
+        venuePlaceId: venuePlaceId ?? null,
+      },
     });
-  }
 
-  const newGig: Gig = {
-    id: randomUUID(),
-    artist: gigInput.artist.trim(),
-    venue: gigInput.venue.trim(),
-    city: gigInput.city.trim(),
-    date: gigInput.date.trim(),
-    rating: gigInput.rating,
-    notes:
-      typeof gigInput.notes === "string" ? gigInput.notes.trim() : undefined,
-    artistMbid,
-    externalSource,
-    externalId,
-    ticketUrl,
-    venueLatitude,
-    venueLongitude,
-    venuePlaceName,
-    venuePlaceId,
-  };
+    const newGig: Gig = {
+      id: created.id,
+      artist: created.artist,
+      venue: created.venue,
+      city: created.city,
+      date: created.date,
+      rating: created.rating ?? undefined,
+      notes: created.notes ?? undefined,
+      artistMbid: created.artistMbid ?? undefined,
+      externalSource: created.externalSource ?? undefined,
+      externalId: created.externalId ?? undefined,
+      ticketUrl: created.ticketUrl ?? undefined,
+      venueLatitude: created.venueLatitude ?? undefined,
+      venueLongitude: created.venueLongitude ?? undefined,
+      venuePlaceName: created.venuePlaceName ?? undefined,
+      venuePlaceId: created.venuePlaceId ?? undefined,
+    };
 
-  gigs.push(newGig);
-
-  try {
-    if (isReplitDbAvailable) {
-      await db.set("gigs", gigs);
-    }
+    return res.status(201).json(newGig);
   } catch (error) {
-    console.error("Error saving gigs to DB:", error);
+    console.error("Error saving gig to Prisma:", error);
+    return res.status(500).json({ error: "Failed to add gig" });
   }
-
-  return res.status(201).json(newGig);
 });
 
-app.patch("/gigs/:id", async (req: Request, res: Response) => {
-  const { id } = req.params;
+app.patch(
+  "/gigs/:id",
+  requireAuth,
+  async (req: AuthedRequest, res: Response) => {
+    const userId = req.user!.id;
+    const { id } = req.params;
 
-  const index = gigs.findIndex((g) => g.id === id);
-  if (index === -1) return res.status(404).json({ error: "Gig not found" });
+    try {
+      const existing = await prisma.gig.findFirst({
+        where: {
+          id,
+          userId,
+        },
+      });
 
-  const existing = gigs[index] as Gig;
+      if (!existing) {
+        return res.status(404).json({ error: "Gig not found" });
+      }
 
-  const next: Gig = {
-    ...existing,
-    artist:
-      typeof req.body.artist === "string"
-        ? req.body.artist.trim()
-        : existing.artist,
-    venue:
-      typeof req.body.venue === "string"
-        ? req.body.venue.trim()
-        : existing.venue,
-    city:
-      typeof req.body.city === "string" ? req.body.city.trim() : existing.city,
-    date:
-      typeof req.body.date === "string" ? req.body.date.trim() : existing.date,
-    rating: req.body.rating !== undefined ? req.body.rating : existing.rating,
-    notes:
-      typeof req.body.notes === "string"
-        ? req.body.notes.trim()
-        : existing.notes,
-    externalSource: existing.externalSource,
-    externalId: existing.externalId,
-    artistMbid: existing.artistMbid,
-    ticketUrl:
-      typeof req.body.ticketUrl === "string"
-        ? req.body.ticketUrl.trim()
-        : existing.ticketUrl,
-    venueLatitude:
-      typeof req.body.venueLatitude === "number"
-        ? req.body.venueLatitude
-        : existing.venueLatitude,
-    venueLongitude:
-      typeof req.body.venueLongitude === "number"
-        ? req.body.venueLongitude
-        : existing.venueLongitude,
-    venuePlaceName:
-      typeof req.body.venuePlaceName === "string"
-        ? req.body.venuePlaceName.trim()
-        : existing.venuePlaceName,
-    venuePlaceId:
-      typeof req.body.venuePlaceId === "string"
-        ? req.body.venuePlaceId.trim()
-        : existing.venuePlaceId,
-  };
+      const next: Gig = {
+        id: existing.id,
+        artist:
+          typeof req.body.artist === "string"
+            ? req.body.artist.trim()
+            : existing.artist,
+        venue:
+          typeof req.body.venue === "string"
+            ? req.body.venue.trim()
+            : existing.venue,
+        city:
+          typeof req.body.city === "string"
+            ? req.body.city.trim()
+            : existing.city,
+        date:
+          typeof req.body.date === "string"
+            ? req.body.date.trim()
+            : existing.date,
+        rating:
+          req.body.rating !== undefined
+            ? req.body.rating
+            : existing.rating ?? undefined,
+        notes:
+          typeof req.body.notes === "string"
+            ? req.body.notes.trim()
+            : existing.notes ?? undefined,
+        externalSource: existing.externalSource ?? undefined,
+        externalId: existing.externalId ?? undefined,
+        artistMbid: existing.artistMbid ?? undefined,
+        ticketUrl:
+          typeof req.body.ticketUrl === "string"
+            ? req.body.ticketUrl.trim()
+            : existing.ticketUrl ?? undefined,
+        venueLatitude:
+          typeof req.body.venueLatitude === "number"
+            ? req.body.venueLatitude
+            : existing.venueLatitude ?? undefined,
+        venueLongitude:
+          typeof req.body.venueLongitude === "number"
+            ? req.body.venueLongitude
+            : existing.venueLongitude ?? undefined,
+        venuePlaceName:
+          typeof req.body.venuePlaceName === "string"
+            ? req.body.venuePlaceName.trim()
+            : existing.venuePlaceName ?? undefined,
+        venuePlaceId:
+          typeof req.body.venuePlaceId === "string"
+            ? req.body.venuePlaceId.trim()
+            : existing.venuePlaceId ?? undefined,
+      };
 
-  const errors: string[] = [];
-  if (!next.artist?.trim()) errors.push("artist must be a non-empty string");
-  if (!next.venue?.trim()) errors.push("venue must be a non-empty string");
-  if (!next.city?.trim()) errors.push("city must be a non-empty string");
-  if (!next.date?.trim()) errors.push("date must be a non-empty string");
-  else if (!/^\d{4}-\d{2}-\d{2}$/.test(next.date)) {
-    errors.push("date must be in YYYY-MM-DD format");
-  }
+      const errors: string[] = [];
+      if (!next.artist?.trim()) errors.push("artist must be a non-empty string");
+      if (!next.venue?.trim()) errors.push("venue must be a non-empty string");
+      if (!next.city?.trim()) errors.push("city must be a non-empty string");
+      if (!next.date?.trim()) errors.push("date must be a non-empty string");
+      else if (!/^\d{4}-\d{2}-\d{2}$/.test(next.date)) {
+        errors.push("date must be in YYYY-MM-DD format");
+      }
 
-  if (next.rating !== undefined && next.rating !== null) {
-    if (
-      typeof next.rating !== "number" ||
-      !Number.isFinite(next.rating) ||
-      next.rating < 1 ||
-      next.rating > 5
-    ) {
-      errors.push("rating must be a number between 1 and 5");
+      if (next.rating !== undefined && next.rating !== null) {
+        if (
+          typeof next.rating !== "number" ||
+          !Number.isFinite(next.rating) ||
+          next.rating < 1 ||
+          next.rating > 5
+        ) {
+          errors.push("rating must be a number between 1 and 5");
+        }
+      }
+
+      if (
+        (next.venueLatitude !== undefined &&
+          next.venueLongitude === undefined) ||
+        (next.venueLatitude === undefined &&
+          next.venueLongitude !== undefined)
+      ) {
+        errors.push("venueLatitude and venueLongitude must be provided together");
+      }
+
+      if (
+        next.venueLatitude !== undefined &&
+        (next.venueLatitude < -90 || next.venueLatitude > 90)
+      ) {
+        errors.push("venueLatitude must be between -90 and 90");
+      }
+
+      if (
+        next.venueLongitude !== undefined &&
+        (next.venueLongitude < -180 || next.venueLongitude > 180)
+      ) {
+        errors.push("venueLongitude must be between -180 and 180");
+      }
+
+      if (errors.length > 0) {
+        return res
+          .status(400)
+          .json({ error: "Validation failed", details: errors });
+      }
+
+      const candidateDuplicates = await prisma.gig.findMany({
+        where: {
+          userId,
+          NOT: { id },
+        },
+      });
+
+      const duplicate = candidateDuplicates.find((g) => {
+        const sameExternal =
+          norm(next.externalSource) &&
+          norm(next.externalId) &&
+          norm(g.externalSource) === norm(next.externalSource) &&
+          norm(g.externalId) === norm(next.externalId);
+
+        if (sameExternal) return true;
+
+        const samePlaceId =
+          norm(next.artist) &&
+          norm(next.date) &&
+          norm(next.venuePlaceId) &&
+          norm(g.artist) === norm(next.artist) &&
+          norm(g.date) === norm(next.date) &&
+          norm(g.venuePlaceId) === norm(next.venuePlaceId);
+
+        if (samePlaceId) return true;
+
+        const sameText =
+          norm(g.artist) === norm(next.artist) &&
+          norm(g.venue) === norm(next.venue) &&
+          norm(g.city) === norm(next.city) &&
+          norm(g.date) === norm(next.date);
+
+        return sameText;
+      });
+
+      if (duplicate) {
+        return res.status(409).json({
+          message: "This change would create a duplicate gig.",
+          existingGigId: duplicate.id,
+        });
+      }
+
+      const updated = await prisma.gig.update({
+        where: { id: existing.id },
+        data: {
+          artist: next.artist.trim(),
+          venue: next.venue.trim(),
+          city: next.city.trim(),
+          date: next.date.trim(),
+          rating: next.rating ?? null,
+          notes: next.notes?.trim() || null,
+          ticketUrl: next.ticketUrl?.trim() || null,
+          venueLatitude: next.venueLatitude ?? null,
+          venueLongitude: next.venueLongitude ?? null,
+          venuePlaceName: next.venuePlaceName?.trim() || null,
+          venuePlaceId: next.venuePlaceId?.trim() || null,
+        },
+      });
+
+      const responseGig: Gig = {
+        id: updated.id,
+        artist: updated.artist,
+        venue: updated.venue,
+        city: updated.city,
+        date: updated.date,
+        rating: updated.rating ?? undefined,
+        notes: updated.notes ?? undefined,
+        artistMbid: updated.artistMbid ?? undefined,
+        externalSource: updated.externalSource ?? undefined,
+        externalId: updated.externalId ?? undefined,
+        ticketUrl: updated.ticketUrl ?? undefined,
+        venueLatitude: updated.venueLatitude ?? undefined,
+        venueLongitude: updated.venueLongitude ?? undefined,
+        venuePlaceName: updated.venuePlaceName ?? undefined,
+        venuePlaceId: updated.venuePlaceId ?? undefined,
+      };
+
+      return res.json(responseGig);
+    } catch (error) {
+      console.error("Error updating gig in Prisma:", error);
+      return res.status(500).json({ error: "Failed to update gig" });
     }
-  }
+  },
+);
 
-  if (
-    (next.venueLatitude !== undefined && next.venueLongitude === undefined) ||
-    (next.venueLatitude === undefined && next.venueLongitude !== undefined)
-  ) {
-    errors.push("venueLatitude and venueLongitude must be provided together");
-  }
+app.delete(
+  "/gigs/:id",
+  requireAuth,
+  async (req: AuthedRequest, res: Response) => {
+    const userId = req.user!.id;
+    const { id } = req.params;
 
-  if (
-    next.venueLatitude !== undefined &&
-    (next.venueLatitude < -90 || next.venueLatitude > 90)
-  ) {
-    errors.push("venueLatitude must be between -90 and 90");
-  }
+    try {
+      const existing = await prisma.gig.findFirst({
+        where: {
+          id,
+          userId,
+        },
+      });
 
-  if (
-    next.venueLongitude !== undefined &&
-    (next.venueLongitude < -180 || next.venueLongitude > 180)
-  ) {
-    errors.push("venueLongitude must be between -180 and 180");
-  }
+      if (!existing) {
+        return res.status(404).json({ error: "Gig not found" });
+      }
 
-  if (errors.length > 0) {
-    return res
-      .status(400)
-      .json({ error: "Validation failed", details: errors });
-  }
+      await prisma.gig.delete({
+        where: { id: existing.id },
+      });
 
-  const duplicate = gigs.find((g) => {
-    if (g.id === id) return false;
+      const deletedGig: Gig = {
+        id: existing.id,
+        artist: existing.artist,
+        venue: existing.venue,
+        city: existing.city,
+        date: existing.date,
+        rating: existing.rating ?? undefined,
+        notes: existing.notes ?? undefined,
+        artistMbid: existing.artistMbid ?? undefined,
+        externalSource: existing.externalSource ?? undefined,
+        externalId: existing.externalId ?? undefined,
+        ticketUrl: existing.ticketUrl ?? undefined,
+        venueLatitude: existing.venueLatitude ?? undefined,
+        venueLongitude: existing.venueLongitude ?? undefined,
+        venuePlaceName: existing.venuePlaceName ?? undefined,
+        venuePlaceId: existing.venuePlaceId ?? undefined,
+      };
 
-    const sameExternal =
-      norm(next.externalSource) &&
-      norm(next.externalId) &&
-      norm(g.externalSource) === norm(next.externalSource) &&
-      norm(g.externalId) === norm(next.externalId);
-
-    if (sameExternal) return true;
-
-    const samePlaceId =
-      norm(next.artist) &&
-      norm(next.date) &&
-      norm(next.venuePlaceId) &&
-      norm(g.artist) === norm(next.artist) &&
-      norm(g.date) === norm(next.date) &&
-      norm(g.venuePlaceId) === norm(next.venuePlaceId);
-
-    if (samePlaceId) return true;
-
-    const sameText =
-      norm(g.artist) === norm(next.artist) &&
-      norm(g.venue) === norm(next.venue) &&
-      norm(g.city) === norm(next.city) &&
-      norm(g.date) === norm(next.date);
-
-    return sameText;
-  });
-
-  if (duplicate) {
-    return res.status(409).json({
-      message: "This change would create a duplicate gig.",
-      existingGigId: duplicate.id,
-    });
-  }
-
-  gigs[index] = next;
-
-  try {
-    if (isReplitDbAvailable) {
-      await db.set("gigs", gigs);
+      return res.status(200).json({ deletedId: id, gig: deletedGig });
+    } catch (error) {
+      console.error("Error deleting gig in Prisma:", error);
+      return res.status(500).json({ error: "Failed to delete gig" });
     }
-  } catch (error) {
-    console.error("Error saving gigs after patch:", error);
-  }
-
-  return res.json(next);
-});
-
-app.delete("/gigs/:id", async (req, res) => {
-  const { id } = req.params;
-
-  const index = gigs.findIndex((g) => g.id === id);
-  if (index === -1) return res.status(404).json({ error: "Gig not found" });
-
-  const [deleted] = gigs.splice(index, 1);
-
-  try {
-    if (isReplitDbAvailable) {
-      await db.set("gigs", gigs);
-    }
-  } catch (error) {
-    console.error("Error saving gigs after delete:", error);
-  }
-
-  return res.status(200).json({ deletedId: id, gig: deleted });
-});
+  },
+);
 
 app.post(
   "/ocr/ticket",

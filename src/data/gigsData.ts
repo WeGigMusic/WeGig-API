@@ -1,22 +1,8 @@
-import { Gig } from '../types/Gig';
+// src/data/gigsData.ts
 
-export const gigs: Gig[] = [
-  {
-    id: '1',
-    artist: 'The National',
-    venue: 'Radio City Music Hall',
-    city: 'New York',
-    date: '2024-05-15',
-    rating: 5,
-    notes: 'Amazing setlist, played all the classics'
-  },
-  {
-    id: '2',
-    artist: 'Arcade Fire',
-    venue: 'Madison Square Garden',
-    city: 'New York',
-    date: '2024-08-22',
-    rating: 4,
-    notes: 'Great energy but sound quality could have been better'
-  }
-];
+import { Gig } from "../types/Gig";
+
+// Legacy seed file no longer used.
+// Data now lives in Supabase/Postgres via Prisma.
+
+export const gigs: Gig[] = [];

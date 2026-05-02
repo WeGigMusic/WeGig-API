@@ -1,5 +1,6 @@
-import Database from "@replit/database";
+// src/db.ts
 
-const db = new Database();
+// Replit DB removed.
+// Prisma now handles all database access via src/prisma.ts
 
-export default db;
+export default null;
