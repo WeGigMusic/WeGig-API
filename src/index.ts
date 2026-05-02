@@ -71,6 +71,8 @@ app.get("/gigs", requireAuth, async (req: AuthedRequest, res: Response) => {
   try {
     const userId = req.user!.id;
 
+    console.log("[gigs] fetching gigs", { userId });
+
     const dbGigs = await prisma.gig.findMany({
       where: { userId },
       orderBy: [{ date: "desc" }, { createdAt: "desc" }],
@@ -103,6 +105,14 @@ app.get("/gigs", requireAuth, async (req: AuthedRequest, res: Response) => {
 
 app.post("/gigs", requireAuth, async (req: AuthedRequest, res: Response) => {
   const userId = req.user!.id;
+
+  console.log("[gigs] creating gig", {
+    userId,
+    artist: req.body?.artist,
+    venue: req.body?.venue,
+    city: req.body?.city,
+    date: req.body?.date,
+  });
 
   const gigInput = req.body as CreateGigInput & {
     externalSource?: unknown;
@@ -350,6 +360,12 @@ app.post("/gigs", requireAuth, async (req: AuthedRequest, res: Response) => {
         venuePlaceName: venuePlaceName ?? null,
         venuePlaceId: venuePlaceId ?? null,
       },
+    });
+
+    console.log("[gigs] created gig", {
+      userId,
+      gigId: created.id,
+      artist: created.artist,
     });
 
     const newGig: Gig = {
