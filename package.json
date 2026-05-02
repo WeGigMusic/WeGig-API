@@ -12,6 +12,7 @@
     "start": "node dist/index.js"
   },
   "dependencies": {
+    "@google-cloud/vision": "^5.3.6",
     "@prisma/adapter-pg": "^7.7.0",
     "@prisma/client": "^7.7.0",
     "cors": "^2.8.5",
