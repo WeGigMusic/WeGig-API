@@ -50,6 +50,9 @@ type SetlistFmSetlist = {
 
 type SetlistFmSearchResponse = {
   setlist?: SetlistFmSetlist[] | SetlistFmSetlist;
+  total?: number;
+  page?: number;
+  itemsPerPage?: number;
 };
 
 export type SetlistItem = {
@@ -65,6 +68,14 @@ export type SetlistItem = {
     encore: number;
     songs: string[];
   }>;
+};
+
+export type SetlistSearchResult = {
+  setlists: SetlistItem[];
+  page: number;
+  total: number;
+  totalPages: number;
+  hasMore: boolean;
 };
 
 export type GigSetlistMatchResult = {
@@ -99,25 +110,42 @@ export class SetlistServiceError extends Error {
 }
 
 const CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const DEFAULT_PAGE_SIZE = 20;
 
 type CachedSetlistEntry = {
-  value: SetlistItem[];
+  value: SetlistSearchResult;
   expiresAt: number;
 };
 
 const cache = new Map<string, CachedSetlistEntry>();
 
-function getCacheKey(artistName: string, artistMbid?: string): string {
-  return artistMbid?.trim()
-    ? `mbid:${artistMbid.trim()}`
-    : `name:${normaliseArtistName(artistName)}`;
+function getCacheKey(input: {
+  artistName: string;
+  artistMbid?: string;
+  city?: string;
+  venue?: string;
+  page: number;
+}): string {
+  const artistKey = input.artistMbid?.trim()
+    ? `mbid:${input.artistMbid.trim()}`
+    : `name:${normaliseArtistName(input.artistName)}`;
+
+  return [
+    artistKey,
+    `city:${norm(input.city)}`,
+    `venue:${norm(input.venue)}`,
+    `page:${input.page}`,
+  ].join("|");
 }
 
-function getCached(
-  artistName: string,
-  artistMbid?: string,
-): SetlistItem[] | undefined {
-  const key = getCacheKey(artistName, artistMbid);
+function getCached(input: {
+  artistName: string;
+  artistMbid?: string;
+  city?: string;
+  venue?: string;
+  page: number;
+}): SetlistSearchResult | undefined {
+  const key = getCacheKey(input);
   const cached = cache.get(key);
 
   if (!cached) return undefined;
@@ -131,11 +159,16 @@ function getCached(
 }
 
 function setCached(
-  artistName: string,
-  value: SetlistItem[],
-  artistMbid?: string,
+  input: {
+    artistName: string;
+    artistMbid?: string;
+    city?: string;
+    venue?: string;
+    page: number;
+  },
+  value: SetlistSearchResult,
 ) {
-  const key = getCacheKey(artistName, artistMbid);
+  const key = getCacheKey(input);
 
   cache.set(key, {
     value,
@@ -355,47 +388,84 @@ export async function searchSetlistsByArtist(
   artistName: string,
   artistMbid?: string,
   filters?: {
-    city?: string;
-    venue?: string;
-  },
-): Promise<SetlistItem[]> {
+  city?: string;
+  venue?: string;
+  page?: number;
+},
+): Promise<SetlistSearchResult> {
   const query = artistName.trim();
-  if (!query) return [];
+  const page = Math.max(1, Number(filters?.page ?? 1));
 
-  if (!env.setlistFmApiKey) {
-    return [];
+  if (!query || !env.setlistFmApiKey) {
+    return {
+      setlists: [],
+      page,
+      total: 0,
+      totalPages: 0,
+      hasMore: false,
+    };
   }
 
-  const cached = getCached(query, artistMbid);
+  const cacheInput = {
+    artistName: query,
+    artistMbid,
+    city: filters?.city,
+    venue: filters?.venue,
+    page,
+  };
+
+  const cached = getCached(cacheInput);
   if (cached !== undefined) {
     return cached;
   }
 
-  try {
+    try {
     const json = await setlistGet<SetlistFmSearchResponse>("/search/setlists", {
-  artistMbid: artistMbid?.trim() || undefined,
-  artistName: artistMbid?.trim() ? undefined : query,
-  cityName: filters?.city?.trim() || undefined,
-  venueName: filters?.venue?.trim() || undefined,
-  p: 1,
-});
-
+      artistMbid: artistMbid?.trim() || undefined,
+      artistName: artistMbid?.trim() ? undefined : query,
+      cityName: filters?.city?.trim() || undefined,
+      venueName: filters?.venue?.trim() || undefined,
+      p: page,
+    });
+    
     const rawItems = toArray(json.setlist);
     const mapped = rawItems
       .map(mapSetlistItem)
       .filter((item): item is SetlistItem => Boolean(item));
 
-    const sorted = sortSetlists(mapped).slice(0, 8);
+    const total = typeof json.total === "number" ? json.total : mapped.length;
+    const itemsPerPage =
+      typeof json.itemsPerPage === "number" && json.itemsPerPage > 0
+        ? json.itemsPerPage
+        : DEFAULT_PAGE_SIZE;
 
-    setCached(query, sorted, artistMbid);
-    return sorted;
+    const totalPages = total > 0 ? Math.ceil(total / itemsPerPage) : 0;
+
+    const result: SetlistSearchResult = {
+      setlists: sortSetlists(mapped),
+      page: typeof json.page === "number" ? json.page : page,
+      total,
+      totalPages,
+      hasMore: totalPages > 0 ? page < totalPages : mapped.length > 0,
+    };
+
+    setCached(cacheInput, result);
+    return result;
   } catch (error: unknown) {
     if (
       error instanceof SetlistServiceError &&
       error.code === "SETLIST_NOT_FOUND"
     ) {
-     setCached(query, [], artistMbid);
-      return [];
+      const empty: SetlistSearchResult = {
+        setlists: [],
+        page,
+        total: 0,
+        totalPages: 0,
+        hasMore: false,
+      };
+
+      setCached(cacheInput, empty);
+      return empty;
     }
 
     throw error;
@@ -419,9 +489,13 @@ export async function matchSetlistToGig(input: {
     };
   }
 
-  const setlists = await searchSetlistsByArtist(artist);
+  const result = await searchSetlistsByArtist(artist, undefined, {
+    city: input.city,
+    venue: input.venue,
+    page: 1,
+  });
 
-  if (setlists.length === 0) {
+  if (result.setlists.length === 0) {
     return {
       matched: false,
       confidence: 0,
@@ -431,7 +505,7 @@ export async function matchSetlistToGig(input: {
 
   const gigDate = parseGigDate(date);
 
-  const ranked = setlists
+  const ranked = result.setlists
     .map((setlist) => ({
       setlist,
       score: scoreCandidate({

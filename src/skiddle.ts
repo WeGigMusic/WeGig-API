@@ -4,16 +4,18 @@ import type { NormalizedEvent } from "./types/Event";
 const BASE = env.skiddleBaseUrl;
 
 export async function searchSkiddleEventsNormalized(input: {
-  keyword?: string;
-  latitude?: number;
-  longitude?: number;
+ keyword?: string;
+ latitude?: number;
+ longitude?: number;
+ radius?: number;
 }) {
+
   const params = new URLSearchParams({
     api_key: env.skiddleApiKey,
     keyword: input.keyword ?? "",
     latitude: String(input.latitude ?? 51.5074),
     longitude: String(input.longitude ?? -0.1278),
-    radius: "15",
+    radius: String(input.radius ?? 50),
     eventcode: "LIVE",
     description: "1",
   });

@@ -362,12 +362,6 @@ app.post("/gigs", requireAuth, async (req: AuthedRequest, res: Response) => {
       },
     });
 
-    console.log("[gigs] created gig", {
-      userId,
-      gigId: created.id,
-      artist: created.artist,
-    });
-
     const newGig: Gig = {
       id: created.id,
       artist: created.artist,
@@ -538,13 +532,12 @@ app.patch(
 
         if (samePlaceId) return true;
 
-        const sameText =
+        return (
           norm(g.artist) === norm(next.artist) &&
           norm(g.venue) === norm(next.venue) &&
           norm(g.city) === norm(next.city) &&
-          norm(g.date) === norm(next.date);
-
-        return sameText;
+          norm(g.date) === norm(next.date)
+        );
       });
 
       if (duplicate) {
@@ -620,25 +613,7 @@ app.delete(
         where: { id: existing.id },
       });
 
-      const deletedGig: Gig = {
-        id: existing.id,
-        artist: existing.artist,
-        venue: existing.venue,
-        city: existing.city,
-        date: existing.date,
-        rating: existing.rating ?? undefined,
-        notes: existing.notes ?? undefined,
-        artistMbid: existing.artistMbid ?? undefined,
-        externalSource: existing.externalSource ?? undefined,
-        externalId: existing.externalId ?? undefined,
-        ticketUrl: existing.ticketUrl ?? undefined,
-        venueLatitude: existing.venueLatitude ?? undefined,
-        venueLongitude: existing.venueLongitude ?? undefined,
-        venuePlaceName: existing.venuePlaceName ?? undefined,
-        venuePlaceId: existing.venuePlaceId ?? undefined,
-      };
-
-      return res.status(200).json({ deletedId: id, gig: deletedGig });
+      return res.status(200).json({ deletedId: id });
     } catch (error) {
       console.error("Error deleting gig in Prisma:", error);
       return res.status(500).json({ error: "Failed to delete gig" });
@@ -683,55 +658,18 @@ app.post(
 );
 
 app.get("/tm/events/search", async (req: Request, res: Response) => {
- try {
-   const {
-     q,
-     keyword,
-     city,
-     latlong,
-     radius,
-     unit,
-     startDateTime,
-     endDateTime,
-     size,
-   } = req.query;
-
-   const kw =
-     typeof q === "string"
-       ? q
-       : typeof keyword === "string"
-       ? keyword
-       : undefined;
-console.log("[tm/events/search] query", req.query);
-   const data = await searchTmEventsUk({
-     keyword: kw,
-     city: typeof city === "string" ? city : undefined,
-
-     // ✅ THIS IS THE CRITICAL FIX
-     latlong: typeof latlong === "string" ? latlong : undefined,
-     radius: typeof radius === "string" ? Number(radius) : undefined,
-     unit:
-       unit === "miles" || unit === "km" ? unit : undefined,
-
-     startDateTime:
-       typeof startDateTime === "string" ? startDateTime : undefined,
-     endDateTime:
-       typeof endDateTime === "string" ? endDateTime : undefined,
-     size: typeof size === "string" ? Number(size) : undefined,
-   });
-
-   return res.json(data);
- } catch (e: any) {
-   return res
-     .status(502)
-     .json({ message: e?.message ?? "Ticketmaster search failed" });
- }
-});
-
-
-app.get("/discover/events", async (req: Request, res: Response) => {
   try {
-    const { q, keyword, city, startDateTime, endDateTime, size } = req.query;
+    const {
+      q,
+      keyword,
+      city,
+      latlong,
+      radius,
+      unit,
+      startDateTime,
+      endDateTime,
+      size,
+    } = req.query;
 
     const kw =
       typeof q === "string"
@@ -740,24 +678,111 @@ app.get("/discover/events", async (req: Request, res: Response) => {
           ? keyword
           : undefined;
 
+    console.log("[tm/events/search] query", req.query);
+
+    const data = await searchTmEventsUk({
+      keyword: kw,
+      city: typeof city === "string" ? city : undefined,
+      latlong: typeof latlong === "string" ? latlong : undefined,
+      radius: typeof radius === "string" ? Number(radius) : undefined,
+      unit: unit === "miles" || unit === "km" ? unit : undefined,
+      startDateTime:
+        typeof startDateTime === "string" ? startDateTime : undefined,
+      endDateTime:
+        typeof endDateTime === "string" ? endDateTime : undefined,
+      size: typeof size === "string" ? Number(size) : undefined,
+    });
+
+    return res.json(data);
+  } catch (e: any) {
+    return res
+      .status(502)
+      .json({ message: e?.message ?? "Ticketmaster search failed" });
+  }
+});
+
+app.get("/discover/events", async (req: Request, res: Response) => {
+  try {
+    const {
+      q,
+      keyword,
+      city,
+      latlong,
+      radius,
+      unit,
+      startDateTime,
+      endDateTime,
+      size,
+    } = req.query;
+
+    const kw =
+      typeof q === "string"
+        ? q
+        : typeof keyword === "string"
+          ? keyword
+          : undefined;
+
+    let latitude: number | undefined;
+    let longitude: number | undefined;
+
+    if (typeof latlong === "string") {
+      const [lat, lng] = latlong.split(",").map(Number);
+
+      if (Number.isFinite(lat) && Number.isFinite(lng)) {
+        latitude = lat;
+        longitude = lng;
+      }
+    }
+
+    const radiusNumber =
+      typeof radius === "string" && Number.isFinite(Number(radius))
+        ? Number(radius)
+        : undefined;
+
+    console.log("[discover/events] query", {
+      keyword: kw,
+      city,
+      latlong,
+      latitude,
+      longitude,
+      radius: radiusNumber,
+      unit,
+      size,
+    });
+
     const tm = await searchTmEventsNormalized({
       keyword: kw,
       city: typeof city === "string" ? city : undefined,
+      latlong: typeof latlong === "string" ? latlong : undefined,
+      radius: radiusNumber,
+      unit: unit === "miles" || unit === "km" ? unit : undefined,
       startDateTime:
         typeof startDateTime === "string" ? startDateTime : undefined,
-      endDateTime: typeof endDateTime === "string" ? endDateTime : undefined,
+      endDateTime:
+        typeof endDateTime === "string" ? endDateTime : undefined,
       size: typeof size === "string" ? Number(size) : undefined,
     });
 
     const skiddle = await searchSkiddleEventsNormalized({
       keyword: kw,
+      latitude,
+      longitude,
+      radius: radiusNumber,
     });
 
     const merged = [...tm.events, ...skiddle.events];
     const events = dedupeEvents(merged);
 
+    console.log("[discover/events] results", {
+      ticketmaster: tm.events.length,
+      skiddle: skiddle.events.length,
+      deduped: events.length,
+    });
+
     return res.json({ events });
   } catch (e: any) {
+    console.error("[discover/events] failed", e);
+
     return res.status(502).json({
       message: e?.message ?? "Discover search failed",
     });
@@ -811,14 +836,10 @@ app.get("/mb/artists/search", async (req, res) => {
     return res.json(result);
   } catch (err: any) {
     console.error("MusicBrainz search error:", err);
-    console.error("MusicBrainz search error cause:", err?.cause);
 
     return res.status(502).json({
       message: "Failed to fetch from MusicBrainz",
       detail: err?.message ?? String(err),
-      cause: err?.cause ? String(err.cause) : undefined,
-      name: err?.name,
-      code: err?.cause?.code ?? err?.code,
     });
   }
 });
@@ -844,28 +865,13 @@ app.get("/spotify/artist-page", async (req: Request, res: Response) => {
   try {
     const name = String(req.query.name ?? "").trim();
 
-    console.log("[route] /spotify/artist-page hit", { name });
-
     if (!name) {
       return res.status(400).json({ message: "Missing artist name" });
     }
 
     const result = await getSpotifyArtistPage(name);
-
-    console.log("[route] /spotify/artist-page success", {
-      name,
-      hasArtist: Boolean(result.artist),
-      topTracks: result.topTracks.length,
-      releases: result.releases.length,
-    });
-
     return res.json(result);
   } catch (e: any) {
-    console.error("[route] /spotify/artist-page failed", {
-      name: String(req.query.name ?? "").trim(),
-      message: e?.message ?? String(e),
-    });
-
     return res.status(502).json({
       message: e?.message ?? "Spotify artist page lookup failed",
     });
@@ -881,6 +887,17 @@ app.get("/setlist/artist", async (req: Request, res: Response) => {
         ? req.query.artistMbid.trim()
         : undefined;
 
+    const city =
+      typeof req.query.city === "string" ? req.query.city.trim() : undefined;
+
+    const venue =
+      typeof req.query.venue === "string" ? req.query.venue.trim() : undefined;
+
+    const page =
+      typeof req.query.page === "string" && Number.isFinite(Number(req.query.page))
+        ? Math.max(1, Number(req.query.page))
+        : 1;
+
     if (!artist) {
       return res.status(400).json({
         success: false,
@@ -889,45 +906,28 @@ app.get("/setlist/artist", async (req: Request, res: Response) => {
       });
     }
 
-    const city =
-  typeof req.query.city === "string" ? req.query.city.trim() : undefined;
-
-const venue =
-  typeof req.query.venue === "string" ? req.query.venue.trim() : undefined;
-
-const setlists = await searchSetlistsByArtist(artist, artistMbid, {
-  city,
-  venue,
-});
+    const result = await searchSetlistsByArtist(artist, artistMbid, {
+      city,
+      venue,
+      page,
+    });
 
     return res.status(200).json({
       success: true,
-      setlists,
+      setlists: result.setlists,
+      page: result.page,
+      total: result.total,
+      totalPages: result.totalPages,
+      hasMore: result.hasMore,
     });
   } catch (error: unknown) {
     if (error instanceof SetlistServiceError) {
-      console.error("Setlist artist lookup failed", {
-        code: error.code,
-        status: error.status,
-        message: error.message,
-        causeText: error.causeText,
-        query: {
-          artist: String(req.query.artist ?? "").trim(),
-          artistMbid:
-            typeof req.query.artistMbid === "string"
-              ? req.query.artistMbid.trim()
-              : undefined,
-        },
-      });
-
       return res.status(503).json({
         success: false,
         code: "SETLIST_UNAVAILABLE",
         message: "Unable to load setlists right now.",
       });
     }
-
-    console.error("Unexpected setlist artist lookup error:", error);
 
     return res.status(500).json({
       success: false,
@@ -978,33 +978,12 @@ app.get("/setlist/gig-match", async (req: Request, res: Response) => {
     });
   } catch (error: unknown) {
     if (error instanceof SetlistServiceError) {
-      console.error("Gig setlist match failed", {
-        code: error.code,
-        status: error.status,
-        message: error.message,
-        causeText: error.causeText,
-        query: {
-          artist: String(req.query.artist ?? "").trim(),
-          date: String(req.query.date ?? "").trim(),
-          city:
-            typeof req.query.city === "string"
-              ? req.query.city.trim()
-              : undefined,
-          venue:
-            typeof req.query.venue === "string"
-              ? req.query.venue.trim()
-              : undefined,
-        },
-      });
-
       return res.status(503).json({
         success: false,
         code: "SETLIST_UNAVAILABLE",
         message: "Unable to load setlist right now.",
       });
     }
-
-    console.error("Unexpected gig setlist match error:", error);
 
     return res.status(500).json({
       success: false,
@@ -1039,3 +1018,4 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`WeGig API server running on port ${PORT}`);
 });
+
