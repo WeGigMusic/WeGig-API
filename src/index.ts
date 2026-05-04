@@ -683,32 +683,51 @@ app.post(
 );
 
 app.get("/tm/events/search", async (req: Request, res: Response) => {
-  try {
-    const { q, keyword, city, startDateTime, endDateTime, size } = req.query;
+ try {
+   const {
+     q,
+     keyword,
+     city,
+     latlong,
+     radius,
+     unit,
+     startDateTime,
+     endDateTime,
+     size,
+   } = req.query;
 
-    const kw =
-      typeof q === "string"
-        ? q
-        : typeof keyword === "string"
-          ? keyword
-          : undefined;
+   const kw =
+     typeof q === "string"
+       ? q
+       : typeof keyword === "string"
+       ? keyword
+       : undefined;
 
-    const data = await searchTmEventsUk({
-      keyword: kw,
-      city: typeof city === "string" ? city : undefined,
-      startDateTime:
-        typeof startDateTime === "string" ? startDateTime : undefined,
-      endDateTime: typeof endDateTime === "string" ? endDateTime : undefined,
-      size: typeof size === "string" ? Number(size) : undefined,
-    });
+   const data = await searchTmEventsUk({
+     keyword: kw,
+     city: typeof city === "string" ? city : undefined,
 
-    return res.json(data);
-  } catch (e: any) {
-    return res
-      .status(502)
-      .json({ message: e?.message ?? "Ticketmaster search failed" });
-  }
+     // ✅ THIS IS THE CRITICAL FIX
+     latlong: typeof latlong === "string" ? latlong : undefined,
+     radius: typeof radius === "string" ? Number(radius) : undefined,
+     unit:
+       unit === "miles" || unit === "km" ? unit : undefined,
+
+     startDateTime:
+       typeof startDateTime === "string" ? startDateTime : undefined,
+     endDateTime:
+       typeof endDateTime === "string" ? endDateTime : undefined,
+     size: typeof size === "string" ? Number(size) : undefined,
+   });
+
+   return res.json(data);
+ } catch (e: any) {
+   return res
+     .status(502)
+     .json({ message: e?.message ?? "Ticketmaster search failed" });
+ }
 });
+
 
 app.get("/discover/events", async (req: Request, res: Response) => {
   try {
@@ -870,7 +889,16 @@ app.get("/setlist/artist", async (req: Request, res: Response) => {
       });
     }
 
-    const setlists = await searchSetlistsByArtist(artist, artistMbid);
+    const city =
+  typeof req.query.city === "string" ? req.query.city.trim() : undefined;
+
+const venue =
+  typeof req.query.venue === "string" ? req.query.venue.trim() : undefined;
+
+const setlists = await searchSetlistsByArtist(artist, artistMbid, {
+  city,
+  venue,
+});
 
     return res.status(200).json({
       success: true,

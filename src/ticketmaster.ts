@@ -7,11 +7,14 @@ const cache = new Map<string, CacheEntry<any>>();
 
 function getCache<T>(key: string): T | null {
   const entry = cache.get(key);
+
   if (!entry) return null;
+
   if (Date.now() > entry.expiresAt) {
     cache.delete(key);
     return null;
   }
+
   return entry.value as T;
 }
 
@@ -21,10 +24,12 @@ function setCache<T>(key: string, value: T, ttlMs: number) {
 
 function buildQuery(params: Record<string, string | number | undefined>) {
   const usp = new URLSearchParams();
+
   for (const [k, v] of Object.entries(params)) {
     if (v === undefined || v === "") continue;
     usp.set(k, String(v));
   }
+
   return usp.toString();
 }
 
@@ -52,6 +57,9 @@ export type TmEventSummary = {
 export async function searchTmEventsUk(input: {
   keyword?: string;
   city?: string;
+  latlong?: string;
+  radius?: number;
+  unit?: "miles" | "km";
   startDateTime?: string;
   endDateTime?: string;
   size?: number;
@@ -65,7 +73,10 @@ export async function searchTmEventsUk(input: {
     apikey: apiKey,
     countryCode,
     keyword: input.keyword,
-    city: input.city,
+    city: input.latlong ? undefined : input.city,
+    latlong: input.latlong,
+    radius: input.radius,
+    unit: input.unit,
     startDateTime: input.startDateTime,
     endDateTime: input.endDateTime,
     size,
@@ -77,6 +88,7 @@ export async function searchTmEventsUk(input: {
 
   const cacheKey = `tm:search:${query}`;
   const cached = getCache<any>(cacheKey);
+
   if (cached) return cached;
 
   const url = `${TM_BASE}/events.json?${query}`;
@@ -103,6 +115,7 @@ export async function getTmEventByIdUk(eventId: string) {
   const query = buildQuery({ apikey: apiKey, countryCode });
   const cacheKey = `tm:event:${eventId}:${query}`;
   const cached = getCache<any>(cacheKey);
+
   if (cached) return cached;
 
   const url = `${TM_BASE}/events/${encodeURIComponent(eventId)}.json?${query}`;
@@ -131,6 +144,7 @@ export async function searchTmVenuesUk(input: {
   const countryCode = env.ticketmasterCountryCode;
 
   const q = input.q.trim();
+
   if (!q) return { venues: [] };
 
   const size = input.size ?? 8;
@@ -145,6 +159,7 @@ export async function searchTmVenuesUk(input: {
 
   const cacheKey = `tm:venues:${query}`;
   const cached = getCache<any>(cacheKey);
+
   if (cached) return cached;
 
   const url = `${TM_BASE}/venues.json?${query}`;
@@ -202,11 +217,17 @@ function mapTmEventToNormalized(event: any): NormalizedEvent {
 export async function searchTmEventsNormalized(input: {
   keyword?: string;
   city?: string;
+  latlong?: string;
+  radius?: number;
+  unit?: "miles" | "km";
   startDateTime?: string;
   endDateTime?: string;
   size?: number;
 }) {
   const raw = await searchTmEventsUk(input);
   const events = raw?._embedded?.events?.map(mapTmEventToNormalized) ?? [];
+
   return { events };
 }
+
+

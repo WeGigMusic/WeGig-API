@@ -354,6 +354,10 @@ function scoreCandidate(input: {
 export async function searchSetlistsByArtist(
   artistName: string,
   artistMbid?: string,
+  filters?: {
+    city?: string;
+    venue?: string;
+  },
 ): Promise<SetlistItem[]> {
   const query = artistName.trim();
   if (!query) return [];
@@ -371,6 +375,8 @@ export async function searchSetlistsByArtist(
     const json = await setlistGet<SetlistFmSearchResponse>("/search/setlists", {
   artistMbid: artistMbid?.trim() || undefined,
   artistName: artistMbid?.trim() ? undefined : query,
+  cityName: filters?.city?.trim() || undefined,
+  venueName: filters?.venue?.trim() || undefined,
   p: 1,
 });
 
