@@ -107,12 +107,17 @@ type CachedSetlistEntry = {
 
 const cache = new Map<string, CachedSetlistEntry>();
 
-function getCacheKey(artistName: string): string {
-  return normaliseArtistName(artistName);
+function getCacheKey(artistName: string, artistMbid?: string): string {
+  return artistMbid?.trim()
+    ? `mbid:${artistMbid.trim()}`
+    : `name:${normaliseArtistName(artistName)}`;
 }
 
-function getCached(artistName: string): SetlistItem[] | undefined {
-  const key = getCacheKey(artistName);
+function getCached(
+  artistName: string,
+  artistMbid?: string,
+): SetlistItem[] | undefined {
+  const key = getCacheKey(artistName, artistMbid);
   const cached = cache.get(key);
 
   if (!cached) return undefined;
@@ -125,8 +130,12 @@ function getCached(artistName: string): SetlistItem[] | undefined {
   return cached.value;
 }
 
-function setCached(artistName: string, value: SetlistItem[]) {
-  const key = getCacheKey(artistName);
+function setCached(
+  artistName: string,
+  value: SetlistItem[],
+  artistMbid?: string,
+) {
+  const key = getCacheKey(artistName, artistMbid);
 
   cache.set(key, {
     value,
@@ -344,6 +353,7 @@ function scoreCandidate(input: {
 
 export async function searchSetlistsByArtist(
   artistName: string,
+  artistMbid?: string,
 ): Promise<SetlistItem[]> {
   const query = artistName.trim();
   if (!query) return [];
@@ -352,16 +362,17 @@ export async function searchSetlistsByArtist(
     return [];
   }
 
-  const cached = getCached(query);
+  const cached = getCached(query, artistMbid);
   if (cached !== undefined) {
     return cached;
   }
 
   try {
     const json = await setlistGet<SetlistFmSearchResponse>("/search/setlists", {
-      artistName: query,
-      p: 1,
-    });
+  artistMbid: artistMbid?.trim() || undefined,
+  artistName: artistMbid?.trim() ? undefined : query,
+  p: 1,
+});
 
     const rawItems = toArray(json.setlist);
     const mapped = rawItems
@@ -370,14 +381,14 @@ export async function searchSetlistsByArtist(
 
     const sorted = sortSetlists(mapped).slice(0, 8);
 
-    setCached(query, sorted);
+    setCached(query, sorted, artistMbid);
     return sorted;
   } catch (error: unknown) {
     if (
       error instanceof SetlistServiceError &&
       error.code === "SETLIST_NOT_FOUND"
     ) {
-      setCached(query, []);
+     setCached(query, [], artistMbid);
       return [];
     }
 

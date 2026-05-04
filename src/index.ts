@@ -857,6 +857,11 @@ app.get("/setlist/artist", async (req: Request, res: Response) => {
   try {
     const artist = String(req.query.artist ?? "").trim();
 
+    const artistMbid =
+      typeof req.query.artistMbid === "string"
+        ? req.query.artistMbid.trim()
+        : undefined;
+
     if (!artist) {
       return res.status(400).json({
         success: false,
@@ -865,7 +870,7 @@ app.get("/setlist/artist", async (req: Request, res: Response) => {
       });
     }
 
-    const setlists = await searchSetlistsByArtist(artist);
+    const setlists = await searchSetlistsByArtist(artist, artistMbid);
 
     return res.status(200).json({
       success: true,
@@ -880,6 +885,10 @@ app.get("/setlist/artist", async (req: Request, res: Response) => {
         causeText: error.causeText,
         query: {
           artist: String(req.query.artist ?? "").trim(),
+          artistMbid:
+            typeof req.query.artistMbid === "string"
+              ? req.query.artistMbid.trim()
+              : undefined,
         },
       });
 
