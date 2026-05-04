@@ -702,7 +702,7 @@ app.get("/tm/events/search", async (req: Request, res: Response) => {
        : typeof keyword === "string"
        ? keyword
        : undefined;
-
+console.log("[tm/events/search] query", req.query);
    const data = await searchTmEventsUk({
      keyword: kw,
      city: typeof city === "string" ? city : undefined,
