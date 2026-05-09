@@ -16,6 +16,7 @@ import {
 } from "./setlist";
 import { getLastFmSimilarArtists } from "./lastfm";
 import { Gig, CreateGigInput } from "./types/Gig";
+import type { NormalizedEvent } from "./types/Event";
 import { dedupeEvents } from "./utils/dedupeEvents";
 import { searchSkiddleEventsNormalized } from "./skiddle";
 import {
@@ -37,6 +38,71 @@ function norm(value: unknown): string {
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase();
+}
+
+function parseLatLong(value: unknown): {
+  latitude?: number;
+  longitude?: number;
+} {
+  if (typeof value !== "string") return {};
+
+  const [lat, lng] = value.split(",").map(Number);
+
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return {};
+
+  return {
+    latitude: lat,
+    longitude: lng,
+  };
+}
+
+function optionalNumber(value: unknown): number | undefined {
+  if (typeof value !== "string") return undefined;
+
+  const next = Number(value);
+
+  return Number.isFinite(next) ? next : undefined;
+}
+
+function setlistDateToYmdSafe(value: unknown): string | undefined {
+  const raw = String(value ?? "").trim();
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(raw)) {
+    return raw;
+  }
+
+  const ddMmYyyy = raw.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+
+  if (ddMmYyyy) {
+    const [, dd, mm, yyyy] = ddMmYyyy;
+    return `${yyyy}-${mm}-${dd}`;
+  }
+
+  return undefined;
+}
+
+function mapSetlistToNormalizedEvent(
+  item: any,
+  fallbackArtist: string,
+): NormalizedEvent {
+  const artistName =
+    String(item?.artistName ?? item?.artist?.name ?? fallbackArtist).trim() ||
+    fallbackArtist;
+
+  return {
+    source: "setlistfm",
+    sourceEventId: String(item?.id ?? ""),
+    title: artistName,
+    date: setlistDateToYmdSafe(item?.eventDate),
+    ticketUrl: item?.url,
+    venueName: item?.venueName ?? item?.venue?.name,
+    city: item?.cityName ?? item?.venue?.city?.name,
+    countryCode:
+      item?.countryCode ??
+      item?.venue?.city?.country?.code ??
+      item?.venue?.city?.country?.countryCode,
+    artists: [{ name: artistName }],
+  };
 }
 
 app.use(cors());
@@ -657,6 +723,150 @@ app.post(
   },
 );
 
+app.get("/events/search", async (req: Request, res: Response) => {
+  try {
+    const {
+      mode,
+      q,
+      keyword,
+      city,
+      venue,
+      latlong,
+      radius,
+      unit,
+      startDateTime,
+      endDateTime,
+      size,
+      artistMbid,
+    } = req.query;
+
+    const searchMode = typeof mode === "string" && mode === "past" ? "past" : "future";
+
+    const kw =
+      typeof q === "string"
+        ? q.trim()
+        : typeof keyword === "string"
+          ? keyword.trim()
+          : "";
+
+    if (!kw) {
+      return res.status(400).json({
+        message: "Missing required query param: q",
+      });
+    }
+
+    const { latitude, longitude } = parseLatLong(latlong);
+    const radiusNumber = optionalNumber(radius);
+    const sizeNumber = optionalNumber(size);
+
+    console.log("[events/search] query", {
+      mode: searchMode,
+      keyword: kw,
+      city,
+      venue,
+      latlong,
+      latitude,
+      longitude,
+      radius: radiusNumber,
+      unit,
+      size: sizeNumber,
+    });
+
+    if (searchMode === "future") {
+      const [tmResult, skiddleResult] = await Promise.allSettled([
+        searchTmEventsNormalized({
+          keyword: kw,
+          city: typeof city === "string" ? city : undefined,
+          latlong: typeof latlong === "string" ? latlong : undefined,
+          radius: radiusNumber,
+          unit: unit === "miles" || unit === "km" ? unit : undefined,
+          startDateTime:
+            typeof startDateTime === "string" ? startDateTime : undefined,
+          endDateTime:
+            typeof endDateTime === "string" ? endDateTime : undefined,
+          size: sizeNumber,
+        }),
+
+        searchSkiddleEventsNormalized({
+          keyword: kw,
+          latitude,
+          longitude,
+          radius: radiusNumber,
+        }),
+      ]);
+
+      const tmEvents =
+        tmResult.status === "fulfilled" ? tmResult.value.events : [];
+
+      const skiddleEvents =
+        skiddleResult.status === "fulfilled" ? skiddleResult.value.events : [];
+
+      if (tmResult.status === "rejected") {
+        console.error("[events/search] Ticketmaster failed", tmResult.reason);
+      }
+
+      if (skiddleResult.status === "rejected") {
+        console.error("[events/search] Skiddle failed", skiddleResult.reason);
+      }
+
+      const events = dedupeEvents([...tmEvents, ...skiddleEvents]);
+
+      console.log("[events/search] future results", {
+        ticketmaster: tmEvents.length,
+        skiddle: skiddleEvents.length,
+        deduped: events.length,
+      });
+
+      return res.json({
+        mode: searchMode,
+        sources: {
+          ticketmaster: tmEvents.length,
+          skiddle: skiddleEvents.length,
+          setlistfm: 0,
+        },
+        events,
+      });
+    }
+
+    const setlistResult = await searchSetlistsByArtist(
+      kw,
+      typeof artistMbid === "string" ? artistMbid : undefined,
+      {
+        city: typeof city === "string" ? city : undefined,
+        venue: typeof venue === "string" ? venue : undefined,
+        page: 1,
+      },
+    );
+
+    const setlistEvents = setlistResult.setlists.map((item: any) =>
+      mapSetlistToNormalizedEvent(item, kw),
+    );
+
+    const events = dedupeEvents(setlistEvents);
+
+    console.log("[events/search] past results", {
+      setlistfm: setlistEvents.length,
+      deduped: events.length,
+    });
+
+    return res.json({
+      mode: searchMode,
+      sources: {
+        ticketmaster: 0,
+        skiddle: 0,
+        setlistfm: setlistEvents.length,
+      },
+      events,
+    });
+  } catch (e: any) {
+    console.error("[events/search] failed", e);
+
+    return res.status(502).json({
+      message: e?.message ?? "Event search failed",
+    });
+  }
+});
+
 app.get("/tm/events/search", async (req: Request, res: Response) => {
   try {
     const {
@@ -722,22 +932,8 @@ app.get("/discover/events", async (req: Request, res: Response) => {
           ? keyword
           : undefined;
 
-    let latitude: number | undefined;
-    let longitude: number | undefined;
-
-    if (typeof latlong === "string") {
-      const [lat, lng] = latlong.split(",").map(Number);
-
-      if (Number.isFinite(lat) && Number.isFinite(lng)) {
-        latitude = lat;
-        longitude = lng;
-      }
-    }
-
-    const radiusNumber =
-      typeof radius === "string" && Number.isFinite(Number(radius))
-        ? Number(radius)
-        : undefined;
+    const { latitude, longitude } = parseLatLong(latlong);
+    const radiusNumber = optionalNumber(radius);
 
     console.log("[discover/events] query", {
       keyword: kw,
@@ -750,32 +946,46 @@ app.get("/discover/events", async (req: Request, res: Response) => {
       size,
     });
 
-    const tm = await searchTmEventsNormalized({
-      keyword: kw,
-      city: typeof city === "string" ? city : undefined,
-      latlong: typeof latlong === "string" ? latlong : undefined,
-      radius: radiusNumber,
-      unit: unit === "miles" || unit === "km" ? unit : undefined,
-      startDateTime:
-        typeof startDateTime === "string" ? startDateTime : undefined,
-      endDateTime:
-        typeof endDateTime === "string" ? endDateTime : undefined,
-      size: typeof size === "string" ? Number(size) : undefined,
-    });
+    const [tmResult, skiddleResult] = await Promise.allSettled([
+      searchTmEventsNormalized({
+        keyword: kw,
+        city: typeof city === "string" ? city : undefined,
+        latlong: typeof latlong === "string" ? latlong : undefined,
+        radius: radiusNumber,
+        unit: unit === "miles" || unit === "km" ? unit : undefined,
+        startDateTime:
+          typeof startDateTime === "string" ? startDateTime : undefined,
+        endDateTime: typeof endDateTime === "string" ? endDateTime : undefined,
+        size: typeof size === "string" ? Number(size) : undefined,
+      }),
 
-    const skiddle = await searchSkiddleEventsNormalized({
-      keyword: kw,
-      latitude,
-      longitude,
-      radius: radiusNumber,
-    });
+      searchSkiddleEventsNormalized({
+        keyword: kw,
+        latitude,
+        longitude,
+        radius: radiusNumber,
+      }),
+    ]);
 
-    const merged = [...tm.events, ...skiddle.events];
-    const events = dedupeEvents(merged);
+    const tmEvents =
+      tmResult.status === "fulfilled" ? tmResult.value.events : [];
+
+    const skiddleEvents =
+      skiddleResult.status === "fulfilled" ? skiddleResult.value.events : [];
+
+    if (tmResult.status === "rejected") {
+      console.error("[discover/events] Ticketmaster failed", tmResult.reason);
+    }
+
+    if (skiddleResult.status === "rejected") {
+      console.error("[discover/events] Skiddle failed", skiddleResult.reason);
+    }
+
+    const events = dedupeEvents([...tmEvents, ...skiddleEvents]);
 
     console.log("[discover/events] results", {
-      ticketmaster: tm.events.length,
-      skiddle: skiddle.events.length,
+      ticketmaster: tmEvents.length,
+      skiddle: skiddleEvents.length,
       deduped: events.length,
     });
 
@@ -1018,4 +1228,3 @@ app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
 app.listen(PORT, "0.0.0.0", () => {
   console.log(`WeGig API server running on port ${PORT}`);
 });
-
