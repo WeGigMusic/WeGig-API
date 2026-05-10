@@ -4,7 +4,7 @@ import multer from "multer";
 import { randomUUID } from "crypto";
 import { unlink } from "fs/promises";
 import "dotenv/config";
-
+import { createSessionToken, searchCities } from "./googlePlaces";
 import prisma from "./prisma";
 import { requireAuth, type AuthedRequest } from "./auth";
 import { searchMbArtists } from "./musicbrainz";
@@ -131,6 +131,33 @@ app.get("/health", (_req: Request, res: Response) => {
 
 app.get("/version", (_req, res) => {
   res.json({ version: "wegig-api-2026-04-22-auth-gigs" });
+});
+
+app.get("/places/cities/search", async (req: Request, res: Response) => {
+  try {
+    const query = String(req.query.q ?? "").trim();
+
+    if (query.length < 2) {
+      return res.json({ cities: [] });
+    }
+
+    const cities = await searchCities(query, createSessionToken());
+
+    return res.json({
+      cities: cities.map((city) => ({
+        id: city.placeId,
+        placeId: city.placeId,
+        name: city.name,
+        placeName: city.placeName,
+      })),
+    });
+  } catch (e: any) {
+    console.error("[places/cities/search] failed", e);
+
+    return res.status(502).json({
+      message: e?.message ?? "City search failed",
+    });
+  }
 });
 
 app.get("/gigs", requireAuth, async (req: AuthedRequest, res: Response) => {

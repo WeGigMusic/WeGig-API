@@ -1,13 +1,19 @@
 const API_KEY = process.env.EXPO_PUBLIC_GOOGLE_MAPS_API_KEY;
 
 if (!API_KEY) {
-  console.warn('Missing EXPO_PUBLIC_GOOGLE_MAPS_API_KEY');
+  console.warn("Missing EXPO_PUBLIC_GOOGLE_MAPS_API_KEY");
 }
 
 export type PlaceSuggestion = {
   placeId: string;
   title: string;
   subtitle?: string;
+};
+
+export type CitySuggestion = {
+  placeId: string;
+  name: string;
+  placeName: string;
 };
 
 export type PlaceDetails = {
@@ -25,30 +31,30 @@ export const createSessionToken = (): string => {
 
 export const searchVenues = async (
   input: string,
-  sessionToken: string
+  sessionToken: string,
 ): Promise<PlaceSuggestion[]> => {
   if (!input.trim()) return [];
 
   const response = await fetch(
-    'https://places.googleapis.com/v1/places:autocomplete',
+    "https://places.googleapis.com/v1/places:autocomplete",
     {
-      method: 'POST',
+      method: "POST",
       headers: {
-        'Content-Type': 'application/json',
-        'X-Goog-Api-Key': API_KEY ?? '',
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": API_KEY ?? "",
       },
       body: JSON.stringify({
         input,
         sessionToken,
         includedPrimaryTypes: [
-          'stadium',
-          'concert_hall',
-          'performing_arts_theater',
-          'event_venue',
+          "stadium",
+          "concert_hall",
+          "performing_arts_theater",
+          "event_venue",
         ],
-        languageCode: 'en',
+        languageCode: "en",
       }),
-    }
+    },
   );
 
   if (!response.ok) {
@@ -63,24 +69,71 @@ export const searchVenues = async (
     .filter(Boolean)
     .map((place: any) => ({
       placeId: place.placeId,
-      title: place.text?.text ?? '',
+      title: place.text?.text ?? "",
       subtitle: place.structuredFormat?.secondaryText?.text,
     }));
 };
 
+export const searchCities = async (
+  input: string,
+  sessionToken: string,
+): Promise<CitySuggestion[]> => {
+  if (!input.trim()) return [];
+
+  const response = await fetch(
+    "https://places.googleapis.com/v1/places:autocomplete",
+    {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Goog-Api-Key": API_KEY ?? "",
+      },
+      body: JSON.stringify({
+        input,
+        sessionToken,
+        includedPrimaryTypes: ["locality", "postal_town"],
+        includedRegionCodes: ["gb"],
+        languageCode: "en",
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(
+      `City autocomplete failed: ${response.status} ${errorText}`,
+    );
+  }
+
+  const data = await response.json();
+
+  return (data.suggestions ?? [])
+    .map((item: any) => item.placePrediction)
+    .filter(Boolean)
+    .map((place: any) => ({
+      placeId: place.placeId,
+      name: place.structuredFormat?.mainText?.text ?? place.text?.text ?? "",
+      placeName: place.text?.text ?? "",
+    }))
+    .filter((city: CitySuggestion) => city.name.trim().length > 0);
+};
+
 export const getPlaceDetails = async (
   placeId: string,
-  sessionToken: string
+  sessionToken: string,
 ): Promise<PlaceDetails> => {
-  const response = await fetch(`https://places.googleapis.com/v1/places/${placeId}`, {
-    method: 'GET',
-    headers: {
-      'X-Goog-Api-Key': API_KEY ?? '',
-      'X-Goog-Session-Token': sessionToken,
-      'X-Goog-FieldMask':
-        'id,displayName,formattedAddress,addressComponents,location',
+  const response = await fetch(
+    `https://places.googleapis.com/v1/places/${placeId}`,
+    {
+      method: "GET",
+      headers: {
+        "X-Goog-Api-Key": API_KEY ?? "",
+        "X-Goog-Session-Token": sessionToken,
+        "X-Goog-FieldMask":
+          "id,displayName,formattedAddress,addressComponents,location",
+      },
     },
-  });
+  );
 
   if (!response.ok) {
     const errorText = await response.text();
@@ -91,7 +144,7 @@ export const getPlaceDetails = async (
 
   return {
     placeId: data.id,
-    venueName: data.displayName?.text ?? '',
+    venueName: data.displayName?.text ?? "",
     city: extractCity(data.addressComponents),
     formattedAddress: data.formattedAddress,
     latitude: data.location?.latitude,
@@ -100,11 +153,15 @@ export const getPlaceDetails = async (
 };
 
 const extractCity = (components: any[] = []): string => {
-  const preferredTypes = ['locality', 'postal_town', 'administrative_area_level_2'];
+  const preferredTypes = [
+    "locality",
+    "postal_town",
+    "administrative_area_level_2",
+  ];
 
   for (const type of preferredTypes) {
     const match = components.find((component) =>
-      (component.types ?? []).includes(type)
+      (component.types ?? []).includes(type),
     );
 
     if (match?.longText) {
@@ -112,5 +169,5 @@ const extractCity = (components: any[] = []): string => {
     }
   }
 
-  return '';
+  return "";
 };
