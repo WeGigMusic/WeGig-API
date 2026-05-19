@@ -8,8 +8,11 @@
   },
   "scripts": {
     "dev": "ts-node-dev --respawn --transpile-only src/index.ts",
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/index.js"
+    "build": "prisma generate && tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "migrate:deploy": "prisma migrate deploy",
+    "postinstall": "prisma generate",
+    "typecheck": "tsc --noEmit"
   },
   "dependencies": {
     "@google-cloud/vision": "^5.3.6",
