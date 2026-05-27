@@ -131,6 +131,9 @@ let tokenExpiryMs = 0;
 const artistCache = new Map<string, CachedArtistEntry>();
 const artistPageCache = new Map<string, CachedArtistPageEntry>();
 
+artistCache.clear();
+artistPageCache.clear();
+
 const ARTIST_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const ARTIST_PAGE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
@@ -342,13 +345,25 @@ function isStrongArtistMatch(query: string, artist: SpotifyArtist): boolean {
   return score >= 240;
 }
 
+function getBestSpotifyImage(images?: SpotifyImage[]): string | null {
+  if (!images || images.length === 0) return null;
+
+  const sorted = [...images].sort((a, b) => {
+    const aSize = (a.width ?? 0) * (a.height ?? 0);
+    const bSize = (b.width ?? 0) * (b.height ?? 0);
+    return bSize - aSize;
+  });
+
+  return sorted[0]?.url ?? null;
+}
+
 function mapSpotifyArtistResult(
   artist: SpotifyArtist,
 ): NonNullable<SpotifyArtistResult> {
   return {
     id: artist.id,
     name: artist.name,
-    imageUrl: artist.images?.[0]?.url ?? null,
+    imageUrl: getBestSpotifyImage(artist.images),
     genres: artist.genres ?? [],
     popularity:
       typeof artist.popularity === "number" ? artist.popularity : null,
@@ -538,7 +553,7 @@ async function getDerivedTopTracksFromAlbums(
       id: track.id,
       name: track.name,
       albumName: track.album.name ?? "",
-      imageUrl: track.album.images?.[0]?.url ?? null,
+      imageUrl: getBestSpotifyImage(track.album.images),
       spotifyUrl:
         track.external_urls?.spotify ??
         track.album.external_urls?.spotify ??
@@ -559,7 +574,7 @@ function mapReleases(albums: SpotifyAlbum[]): SpotifyArtistPageRelease[] {
   return albums.slice(0, 6).map((album) => ({
     id: album.id,
     name: album.name,
-    imageUrl: album.images?.[0]?.url ?? null,
+    imageUrl: getBestSpotifyImage(album.images),
     releaseDate: album.release_date ?? null,
     spotifyUrl: album.external_urls?.spotify ?? null,
     albumType: album.album_type ?? null,
