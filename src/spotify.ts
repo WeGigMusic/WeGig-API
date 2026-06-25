@@ -81,6 +81,10 @@ type SpotifySeveralTracksResponse = {
   tracks?: SpotifyTrack[];
 };
 
+type SpotifyTopTracksResponse = {
+  tracks?: SpotifyTrack[];
+};
+
 export type SpotifyArtistResult = {
   id: string;
   name: string;
@@ -131,9 +135,6 @@ let tokenExpiryMs = 0;
 const artistCache = new Map<string, CachedArtistEntry>();
 const artistPageCache = new Map<string, CachedArtistPageEntry>();
 
-artistCache.clear();
-artistPageCache.clear();
-
 const ARTIST_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 const ARTIST_PAGE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
 
@@ -156,9 +157,7 @@ function getCachedArtist(name: string): SpotifyArtistResult | undefined {
 }
 
 function setCachedArtist(name: string, value: SpotifyArtistResult) {
-  const key = getArtistCacheKey(name);
-
-  artistCache.set(key, {
+  artistCache.set(getArtistCacheKey(name), {
     value,
     expiresAt: Date.now() + ARTIST_CACHE_TTL_MS,
   });
@@ -179,9 +178,7 @@ function getCachedArtistPage(name: string): SpotifyArtistPageResult | undefined 
 }
 
 function setCachedArtistPage(name: string, value: SpotifyArtistPageResult) {
-  const key = getArtistCacheKey(name);
-
-  artistPageCache.set(key, {
+  artistPageCache.set(getArtistCacheKey(name), {
     value,
     expiresAt: Date.now() + ARTIST_PAGE_CACHE_TTL_MS,
   });
@@ -225,7 +222,6 @@ async function spotifyGet<T>(
   query?: Record<string, string | number | undefined>,
 ): Promise<T> {
   const token = await getSpotifyAccessToken();
-
   const url = new URL(`https://api.spotify.com/v1${path}`);
 
   Object.entries(query ?? {}).forEach(([key, value]) => {
@@ -264,25 +260,9 @@ function scoreArtistMatch(query: string, artist: SpotifyArtist): number {
   const qTokens = tokenizeArtistName(query);
   const nameTokens = tokenizeArtistName(artist.name);
 
-  const qJoined = qTokens.join(" ");
-  const nameJoined = nameTokens.join(" ");
-
   let score = 0;
 
-  if (nameJoined === qJoined) {
-    score += 1000;
-  }
-
-  if (name === q) {
-    score += 1000;
-  }
-
-  if (
-    qTokens.length === nameTokens.length &&
-    qTokens.every((token, index) => token === nameTokens[index])
-  ) {
-    score += 500;
-  }
+  if (name === q) score += 2000;
 
   const sharedTokenCount = qTokens.filter((token) =>
     nameTokens.includes(token),
@@ -292,33 +272,16 @@ function scoreArtistMatch(query: string, artist: SpotifyArtist): number {
     score += sharedTokenCount * 80;
   }
 
-  if (name.startsWith(q)) {
-    score += 120;
-  }
-
-  if (nameJoined.startsWith(qJoined)) {
-    score += 120;
-  }
+  if (name.startsWith(q)) score += 120;
 
   if (qTokens.length > 1) {
     const allQueryTokensPresent = qTokens.every((token) =>
       nameTokens.includes(token),
     );
 
-    if (allQueryTokensPresent) {
-      score += 220;
-    }
+    if (allQueryTokensPresent) score += 220;
   }
 
-  if (name.includes(q) && name !== q) {
-    score += 20;
-  }
-
-  if (q.includes(name) && name !== q) {
-    score += 10;
-  }
-
-  // popularity is only a weak tiebreaker now
   score += Math.min((artist.popularity ?? 0) / 10, 8);
 
   return score;
@@ -337,12 +300,9 @@ function isStrongArtistMatch(query: string, artist: SpotifyArtist): boolean {
   const allQueryTokensPresent =
     qTokens.length > 0 && qTokens.every((token) => nameTokens.includes(token));
 
-  if (allQueryTokensPresent && qTokens.length >= 2) {
-    return true;
-  }
+  if (allQueryTokensPresent && qTokens.length >= 2) return true;
 
-  const score = scoreArtistMatch(query, artist);
-  return score >= 240;
+  return scoreArtistMatch(query, artist) >= 240;
 }
 
 function getBestSpotifyImage(images?: SpotifyImage[]): string | null {
@@ -403,8 +363,8 @@ async function getSpotifyArtistAlbums(artistId: string): Promise<SpotifyAlbum[]>
   const json = await spotifyGet<SpotifyArtistAlbumsResponse>(
     `/artists/${artistId}/albums`,
     {
-      include_groups: "album,single",
-      limit: 10,
+      include_groups: "album,single,compilation",
+      limit: 50,
       market: "GB",
     },
   );
@@ -424,28 +384,6 @@ async function getSpotifyAlbumTracks(albumId: string): Promise<SpotifyAlbumTrack
   return json.items ?? [];
 }
 
-async function getSpotifyTracks(ids: string[]): Promise<SpotifyTrack[]> {
-  if (ids.length === 0) return [];
-
-  const chunks: string[][] = [];
-  for (let i = 0; i < ids.length; i += 50) {
-    chunks.push(ids.slice(i, i + 50));
-  }
-
-  const results = await Promise.all(
-    chunks.map(async (chunk) => {
-      const json = await spotifyGet<SpotifySeveralTracksResponse>("/tracks", {
-        ids: chunk.join(","),
-        market: "GB",
-      });
-
-      return json.tracks ?? [];
-    }),
-  );
-
-  return results.flat().filter((track): track is SpotifyTrack => Boolean(track));
-}
-
 async function getBestMatchingSpotifyArtist(
   name: string,
 ): Promise<SpotifyArtist | null> {
@@ -455,7 +393,8 @@ async function getBestMatchingSpotifyArtist(
   const json = await spotifyGet<SpotifySearchResponse>("/search", {
     q: query,
     type: "artist",
-    limit: 8,
+    limit: 20,
+    market: "GB",
   });
 
   const artists = json.artists?.items ?? [];
@@ -466,17 +405,10 @@ async function getBestMatchingSpotifyArtist(
       artist,
       score: scoreArtistMatch(query, artist),
     }))
-    .sort((a, b) => b.score - a.score);
-
-  console.log("[spotify] artist candidates", {
-    query,
-    candidates: ranked.map(({ artist, score }) => ({
-      name: artist.name,
-      id: artist.id,
-      popularity: artist.popularity ?? null,
-      score,
-    })),
-  });
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return (b.artist.popularity ?? 0) - (a.artist.popularity ?? 0);
+    });
 
   const best = ranked[0];
   if (!best) return null;
@@ -501,9 +433,7 @@ export async function searchSpotifyArtist(
   if (!query) return null;
 
   const cached = getCachedArtist(query);
-  if (cached !== undefined) {
-    return cached;
-  }
+  if (cached !== undefined) return cached;
 
   const best = await getBestMatchingSpotifyArtist(query);
 
@@ -515,6 +445,26 @@ export async function searchSpotifyArtist(
   const result = mapSpotifyArtistResult(best);
   setCachedArtist(query, result);
   return result;
+}
+
+async function getSpotifyArtistTopTracks(
+  artistId: string,
+): Promise<SpotifyArtistPageTrack[]> {
+  const json = await spotifyGet<SpotifyTopTracksResponse>(
+    `/artists/${artistId}/top-tracks`,
+    {
+      market: "GB",
+    },
+  );
+
+  return (json.tracks ?? []).slice(0, 5).map((track) => ({
+    id: track.id,
+    name: track.name,
+    albumName: track.album?.name ?? "",
+    imageUrl: getBestSpotifyImage(track.album?.images),
+    spotifyUrl: track.external_urls?.spotify ?? null,
+    durationMs: typeof track.duration_ms === "number" ? track.duration_ms : null,
+  }));
 }
 
 async function getDerivedTopTracksFromAlbums(
@@ -563,13 +513,6 @@ async function getDerivedTopTracksFromAlbums(
     }));
 }
 
-async function getDerivedTopTracks(
-  artistId: string,
-): Promise<SpotifyArtistPageTrack[]> {
-  const albums = await getSpotifyArtistAlbums(artistId);
-  return getDerivedTopTracksFromAlbums(albums);
-}
-
 function mapReleases(albums: SpotifyAlbum[]): SpotifyArtistPageRelease[] {
   return albums.slice(0, 6).map((album) => ({
     id: album.id,
@@ -595,9 +538,7 @@ export async function getSpotifyArtistPage(
   }
 
   const cached = getCachedArtistPage(query);
-  if (cached !== undefined) {
-    return cached;
-  }
+  if (cached !== undefined) return cached;
 
   const best = await getBestMatchingSpotifyArtist(query);
 
@@ -616,8 +557,8 @@ export async function getSpotifyArtistPage(
   const artist = mapSpotifyArtistResult(best);
 
   let albums: SpotifyAlbum[] = [];
-  let topTracks: SpotifyArtistPageTrack[] = [];
   let releases: SpotifyArtistPageRelease[] = [];
+  let topTracks: SpotifyArtistPageTrack[] = [];
 
   try {
     albums = await getSpotifyArtistAlbums(best.id);
@@ -631,15 +572,21 @@ export async function getSpotifyArtistPage(
   }
 
   try {
-    if (albums.length > 0) {
+    topTracks = await getSpotifyArtistTopTracks(best.id);
+
+    if (topTracks.length === 0 && albums.length > 0) {
       topTracks = await getDerivedTopTracksFromAlbums(albums);
     }
   } catch (error) {
-    console.error("[spotify] failed to build top tracks", {
+    console.error("[spotify] failed to fetch top tracks", {
       query,
       artistId: best.id,
       message: error instanceof Error ? error.message : String(error),
     });
+
+    if (albums.length > 0) {
+      topTracks = await getDerivedTopTracksFromAlbums(albums);
+    }
   }
 
   const result: SpotifyArtistPageResult = {
