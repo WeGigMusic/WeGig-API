@@ -19,12 +19,8 @@ type SpotifyArtist = {
   genres?: string[];
   popularity?: number;
   images?: SpotifyImage[];
-  external_urls?: {
-    spotify?: string;
-  };
-  followers?: {
-    total?: number;
-  };
+  external_urls?: { spotify?: string };
+  followers?: { total?: number };
 };
 
 type SpotifyAlbum = {
@@ -33,40 +29,18 @@ type SpotifyAlbum = {
   album_type?: string;
   release_date?: string;
   images?: SpotifyImage[];
-  external_urls?: {
-    spotify?: string;
-  };
+  external_urls?: { spotify?: string };
 };
 
 type SpotifyAlbumTrack = {
   id: string;
   name: string;
   duration_ms?: number;
-  external_urls?: {
-    spotify?: string;
-  };
-};
-
-type SpotifyTrack = {
-  id: string;
-  name: string;
-  duration_ms?: number;
-  popularity?: number;
-  preview_url?: string | null;
-  external_urls?: {
-    spotify?: string;
-  };
-  album?: {
-    id?: string;
-    name?: string;
-    images?: SpotifyImage[];
-  };
+  external_urls?: { spotify?: string };
 };
 
 type SpotifySearchResponse = {
-  artists?: {
-    items?: SpotifyArtist[];
-  };
+  artists?: { items?: SpotifyArtist[] };
 };
 
 type SpotifyArtistAlbumsResponse = {
@@ -75,14 +49,6 @@ type SpotifyArtistAlbumsResponse = {
 
 type SpotifyAlbumTracksResponse = {
   items?: SpotifyAlbumTrack[];
-};
-
-type SpotifySeveralTracksResponse = {
-  tracks?: SpotifyTrack[];
-};
-
-type SpotifyTopTracksResponse = {
-  tracks?: SpotifyTrack[];
 };
 
 export type SpotifyArtistResult = {
@@ -142,14 +108,17 @@ function getArtistCacheKey(name: string): string {
   return normaliseArtistName(name);
 }
 
+function getArtistPageCacheKey(name: string): string {
+  return `${normaliseArtistName(name)}:v2`;
+}
+
 function getCachedArtist(name: string): SpotifyArtistResult | undefined {
-  const key = getArtistCacheKey(name);
-  const cached = artistCache.get(key);
+  const cached = artistCache.get(getArtistCacheKey(name));
 
   if (!cached) return undefined;
 
   if (Date.now() >= cached.expiresAt) {
-    artistCache.delete(key);
+    artistCache.delete(getArtistCacheKey(name));
     return undefined;
   }
 
@@ -164,7 +133,7 @@ function setCachedArtist(name: string, value: SpotifyArtistResult) {
 }
 
 function getCachedArtistPage(name: string): SpotifyArtistPageResult | undefined {
-  const key = getArtistCacheKey(name);
+  const key = getArtistPageCacheKey(name);
   const cached = artistPageCache.get(key);
 
   if (!cached) return undefined;
@@ -178,7 +147,9 @@ function getCachedArtistPage(name: string): SpotifyArtistPageResult | undefined 
 }
 
 function setCachedArtistPage(name: string, value: SpotifyArtistPageResult) {
-  artistPageCache.set(getArtistCacheKey(name), {
+  if (value.topTracks.length === 0 && value.releases.length === 0) return;
+
+  artistPageCache.set(getArtistPageCacheKey(name), {
     value,
     expiresAt: Date.now() + ARTIST_PAGE_CACHE_TTL_MS,
   });
@@ -187,9 +158,7 @@ function setCachedArtistPage(name: string, value: SpotifyArtistPageResult) {
 async function getSpotifyAccessToken(): Promise<string> {
   const now = Date.now();
 
-  if (cachedToken && now < tokenExpiryMs) {
-    return cachedToken;
-  }
+  if (cachedToken && now < tokenExpiryMs) return cachedToken;
 
   const auth = Buffer.from(
     `${env.spotifyClientId}:${env.spotifyClientSecret}`,
@@ -231,9 +200,7 @@ async function spotifyGet<T>(
   });
 
   const res = await fetch(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${token}`,
-    },
+    headers: { Authorization: `Bearer ${token}` },
   });
 
   if (!res.ok) {
@@ -268,18 +235,15 @@ function scoreArtistMatch(query: string, artist: SpotifyArtist): number {
     nameTokens.includes(token),
   ).length;
 
-  if (sharedTokenCount > 0) {
-    score += sharedTokenCount * 80;
-  }
+  score += sharedTokenCount * 80;
 
   if (name.startsWith(q)) score += 120;
 
-  if (qTokens.length > 1) {
-    const allQueryTokensPresent = qTokens.every((token) =>
-      nameTokens.includes(token),
-    );
-
-    if (allQueryTokensPresent) score += 220;
+  if (
+    qTokens.length > 1 &&
+    qTokens.every((token) => nameTokens.includes(token))
+  ) {
+    score += 220;
   }
 
   score += Math.min((artist.popularity ?? 0) / 10, 8);
@@ -297,10 +261,12 @@ function isStrongArtistMatch(query: string, artist: SpotifyArtist): boolean {
   const qTokens = tokenizeArtistName(query);
   const nameTokens = tokenizeArtistName(artist.name);
 
-  const allQueryTokensPresent =
-    qTokens.length > 0 && qTokens.every((token) => nameTokens.includes(token));
-
-  if (allQueryTokensPresent && qTokens.length >= 2) return true;
+  if (
+    qTokens.length >= 2 &&
+    qTokens.every((token) => nameTokens.includes(token))
+  ) {
+    return true;
+  }
 
   return scoreArtistMatch(query, artist) >= 240;
 }
@@ -347,7 +313,10 @@ function dedupeAlbums(albums: SpotifyAlbum[]): SpotifyAlbum[] {
 }
 
 function dedupeTrackCandidates<
-  T extends SpotifyAlbumTrack & { album: SpotifyAlbum; albumTrackNumber?: number },
+  T extends SpotifyAlbumTrack & {
+    album: SpotifyAlbum;
+    albumTrackNumber?: number;
+  },
 >(tracks: T[]): T[] {
   const seen = new Set<string>();
 
@@ -363,21 +332,21 @@ async function getSpotifyArtistAlbums(artistId: string): Promise<SpotifyAlbum[]>
   const json = await spotifyGet<SpotifyArtistAlbumsResponse>(
     `/artists/${artistId}/albums`,
     {
-      include_groups: "album,single,compilation",
-      limit: 50,
-      market: "GB",
+      include_groups: "album,single",
+      limit: 20,
     },
   );
 
   return dedupeAlbums(json.items ?? []);
 }
 
-async function getSpotifyAlbumTracks(albumId: string): Promise<SpotifyAlbumTrack[]> {
+async function getSpotifyAlbumTracks(
+  albumId: string,
+): Promise<SpotifyAlbumTrack[]> {
   const json = await spotifyGet<SpotifyAlbumTracksResponse>(
     `/albums/${albumId}/tracks`,
     {
       limit: 50,
-      market: "GB",
     },
   );
 
@@ -391,10 +360,10 @@ async function getBestMatchingSpotifyArtist(
   if (!query) return null;
 
   const json = await spotifyGet<SpotifySearchResponse>("/search", {
-  q: query,
-  type: "artist",
-  limit: 10,
-});
+    q: query,
+    type: "artist",
+    limit: 10,
+  });
 
   const artists = json.artists?.items ?? [];
   if (artists.length === 0) return null;
@@ -419,6 +388,7 @@ async function getBestMatchingSpotifyArtist(
       chosenId: best.artist.id,
       score: best.score,
     });
+
     return null;
   }
 
@@ -446,34 +416,15 @@ export async function searchSpotifyArtist(
   return result;
 }
 
-async function getSpotifyArtistTopTracks(
-  artistId: string,
-): Promise<SpotifyArtistPageTrack[]> {
-  const json = await spotifyGet<SpotifyTopTracksResponse>(
-    `/artists/${artistId}/top-tracks`,
-    {
-      market: "GB",
-    },
-  );
-
-  return (json.tracks ?? []).slice(0, 5).map((track) => ({
-    id: track.id,
-    name: track.name,
-    albumName: track.album?.name ?? "",
-    imageUrl: getBestSpotifyImage(track.album?.images),
-    spotifyUrl: track.external_urls?.spotify ?? null,
-    durationMs: typeof track.duration_ms === "number" ? track.duration_ms : null,
-  }));
-}
-
 async function getDerivedTopTracksFromAlbums(
   albums: SpotifyAlbum[],
 ): Promise<SpotifyArtistPageTrack[]> {
-  const candidateAlbums = albums.slice(0, 8);
+  const candidateAlbums = albums.slice(0, 6);
 
   const albumTrackGroups = await Promise.all(
     candidateAlbums.map(async (album) => {
       const tracks = await getSpotifyAlbumTracks(album.id);
+
       return tracks.map((track, index) => ({
         ...track,
         album,
@@ -493,6 +444,7 @@ async function getDerivedTopTracksFromAlbums(
 
       const aDate = a.album.release_date ?? "";
       const bDate = b.album.release_date ?? "";
+
       if (bDate !== aDate) return bDate.localeCompare(aDate);
 
       return (a.albumTrackNumber ?? 999) - (b.albumTrackNumber ?? 999);
@@ -501,7 +453,7 @@ async function getDerivedTopTracksFromAlbums(
     .map((track) => ({
       id: track.id,
       name: track.name,
-      albumName: track.album.name ?? "",
+      albumName: track.album.name,
       imageUrl: getBestSpotifyImage(track.album.images),
       spotifyUrl:
         track.external_urls?.spotify ??
@@ -549,7 +501,6 @@ export async function getSpotifyArtistPage(
     };
 
     setCachedArtist(query, null);
-    setCachedArtistPage(query, emptyResult);
     return emptyResult;
   }
 
@@ -571,21 +522,15 @@ export async function getSpotifyArtistPage(
   }
 
   try {
-    topTracks = await getSpotifyArtistTopTracks(best.id);
-
-    if (topTracks.length === 0 && albums.length > 0) {
+    if (albums.length > 0) {
       topTracks = await getDerivedTopTracksFromAlbums(albums);
     }
   } catch (error) {
-    console.error("[spotify] failed to fetch top tracks", {
+    console.error("[spotify] failed to derive top tracks from albums", {
       query,
       artistId: best.id,
       message: error instanceof Error ? error.message : String(error),
     });
-
-    if (albums.length > 0) {
-      topTracks = await getDerivedTopTracksFromAlbums(albums);
-    }
   }
 
   const result: SpotifyArtistPageResult = {
