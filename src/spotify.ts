@@ -391,11 +391,10 @@ async function getBestMatchingSpotifyArtist(
   if (!query) return null;
 
   const json = await spotifyGet<SpotifySearchResponse>("/search", {
-    q: query,
-    type: "artist",
-    limit: 20,
-    market: "GB",
-  });
+  q: query,
+  type: "artist",
+  limit: 10,
+});
 
   const artists = json.artists?.items ?? [];
   if (artists.length === 0) return null;
