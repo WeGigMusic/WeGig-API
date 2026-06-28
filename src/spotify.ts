@@ -1,5 +1,10 @@
 import { env } from "./env";
 import { normaliseArtistName } from "./utils/normaliseArtistName";
+import {
+  searchMbArtists,
+  getArtistReleases,
+  type ArtistRelease,
+} from "./musicbrainz";
 
 type SpotifyTokenResponse = {
   access_token: string;
@@ -70,14 +75,7 @@ export type SpotifyArtistPageTrack = {
   durationMs: number | null;
 };
 
-export type SpotifyArtistPageRelease = {
-  id: string;
-  name: string;
-  imageUrl: string | null;
-  releaseDate: string | null;
-  spotifyUrl: string | null;
-  albumType: string | null;
-};
+export type SpotifyArtistPageRelease = ArtistRelease;
 
 export type SpotifyArtistPageResult = {
   artist: SpotifyArtistResult;
@@ -109,7 +107,7 @@ function getArtistCacheKey(name: string): string {
 }
 
 function getArtistPageCacheKey(name: string): string {
-  return `${normaliseArtistName(name)}:v2`;
+  return `${normaliseArtistName(name)}:v3`;
 }
 
 function getCachedArtist(name: string): SpotifyArtistResult | undefined {
@@ -464,15 +462,31 @@ async function getDerivedTopTracksFromAlbums(
     }));
 }
 
-function mapReleases(albums: SpotifyAlbum[]): SpotifyArtistPageRelease[] {
-  return albums.slice(0, 6).map((album) => ({
-    id: album.id,
-    name: album.name,
-    imageUrl: getBestSpotifyImage(album.images),
-    releaseDate: album.release_date ?? null,
-    spotifyUrl: album.external_urls?.spotify ?? null,
-    albumType: album.album_type ?? null,
-  }));
+async function getMusicBrainzReleasesForArtist(
+  spotifyArtistName: string,
+  fallbackName: string,
+): Promise<SpotifyArtistPageRelease[]> {
+  try {
+    const mbResult = await searchMbArtists({
+      q: spotifyArtistName || fallbackName,
+      limit: 1,
+    });
+
+    const bestMatch = mbResult.artists[0];
+
+    if (!bestMatch?.id) {
+      return [];
+    }
+
+    return await getArtistReleases(bestMatch.id);
+  } catch (error) {
+    console.error("[spotify] failed to fetch MusicBrainz releases", {
+      artist: spotifyArtistName || fallbackName,
+      message: error instanceof Error ? error.message : String(error),
+    });
+
+    return [];
+  }
 }
 
 export async function getSpotifyArtistPage(
@@ -507,12 +521,11 @@ export async function getSpotifyArtistPage(
   const artist = mapSpotifyArtistResult(best);
 
   let albums: SpotifyAlbum[] = [];
-  let releases: SpotifyArtistPageRelease[] = [];
   let topTracks: SpotifyArtistPageTrack[] = [];
+  let releases: SpotifyArtistPageRelease[] = [];
 
   try {
     albums = await getSpotifyArtistAlbums(best.id);
-    releases = mapReleases(albums);
   } catch (error) {
     console.error("[spotify] failed to fetch albums", {
       query,
@@ -532,6 +545,8 @@ export async function getSpotifyArtistPage(
       message: error instanceof Error ? error.message : String(error),
     });
   }
+
+  releases = await getMusicBrainzReleasesForArtist(best.name, query);
 
   const result: SpotifyArtistPageResult = {
     artist,
