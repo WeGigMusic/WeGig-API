@@ -7,7 +7,7 @@ import "dotenv/config";
 import { createSessionToken, searchCities } from "./googlePlaces";
 import prisma from "./prisma";
 import { requireAuth, type AuthedRequest } from "./auth";
-import { searchMbArtists } from "./musicbrainz";
+import { searchMbArtists, getArtistReleases } from "./musicbrainz";
 import { searchSpotifyArtist, getSpotifyArtistPage } from "./spotify";
 import {
   searchSetlistsByArtist,
@@ -1082,6 +1082,27 @@ app.get("/mb/artists/search", async (req, res) => {
 
     return res.status(502).json({
       message: "Failed to fetch from MusicBrainz",
+      detail: err?.message ?? String(err),
+    });
+  }
+});
+
+app.get("/mb/artists/:mbid/releases", async (req: Request, res: Response) => {
+  try {
+    const mbid = String(req.params.mbid ?? "").trim();
+
+    if (!mbid) {
+      return res.status(400).json({ message: "Missing artist MBID" });
+    }
+
+    const releases = await getArtistReleases(mbid);
+
+    return res.json({ releases });
+  } catch (err: any) {
+    console.error("MusicBrainz releases error:", err);
+
+    return res.status(502).json({
+      message: "Failed to fetch artist releases from MusicBrainz",
       detail: err?.message ?? String(err),
     });
   }
