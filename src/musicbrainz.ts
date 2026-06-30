@@ -48,7 +48,11 @@ function sleep(ms: number) {
 async function throttleOneReqPerSec() {
   const now = Date.now();
   const delta = now - lastRequestAt;
-  if (delta < 1000) await sleep(1000 - delta);
+
+  if (delta < 1000) {
+    await sleep(1000 - delta);
+  }
+
   lastRequestAt = Date.now();
 }
 
@@ -78,12 +82,33 @@ function scoreArtistMatch(query: string, artist: MbArtist): number {
 
   let score = 0;
 
-  if (name === q) score += 100;
-  if (name.startsWith(q)) score += 30;
-  if (name.includes(q)) score += 10;
-  if (artist.score) score += artist.score / 10;
+  if (name === q) score += 1000;
+  if (name.startsWith(q)) score += 100;
+  if (name.includes(q)) score += 25;
+
+  if (artist.score) {
+    score += artist.score / 100;
+  }
 
   return score;
+}
+
+function parseMbDate(date?: string): number {
+  if (!date) return 0;
+
+  if (/^\d{4}$/.test(date)) {
+    return Date.parse(`${date}-01-01`);
+  }
+
+  if (/^\d{4}-\d{2}$/.test(date)) {
+    return Date.parse(`${date}-01`);
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+    return Date.parse(date);
+  }
+
+  return 0;
 }
 
 async function coverArtExists(releaseGroupId: string): Promise<boolean> {
@@ -115,7 +140,7 @@ export async function searchMbArtists(params: { q: string; limit?: number }) {
   await throttleOneReqPerSec();
 
   const url =
-    `${MB_BASE}/artist?query=${encodeURIComponent(`artist:${q}`)}` +
+    `${MB_BASE}/artist?query=${encodeURIComponent(`artist:"${q}"`)}` +
     `&limit=${limit}&fmt=json`;
 
   const res = await fetch(url, {
@@ -137,7 +162,9 @@ export async function searchMbArtists(params: { q: string; limit?: number }) {
   );
 
   const payload = { count: artists.length, artists };
+
   setCached(cacheKey, payload);
+
   return payload;
 }
 
@@ -152,7 +179,7 @@ export async function getArtistReleases(mbid: string): Promise<ArtistRelease[]> 
 
   const url =
     `${MB_BASE}/release-group?artist=${encodeURIComponent(artistMbid)}` +
-    `&type=album|ep|single&limit=25&fmt=json`;
+    `&type=album|ep|single&limit=100&fmt=json`;
 
   const res = await fetch(url, {
     headers: {
@@ -168,8 +195,17 @@ export async function getArtistReleases(mbid: string): Promise<ArtistRelease[]> 
 
   const json = (await res.json()) as MbReleaseGroupsResponse;
 
+  const sortedItems = (json["release-groups"] ?? [])
+    .filter((item) => item["first-release-date"])
+    .sort(
+      (a, b) =>
+        parseMbDate(b["first-release-date"]) -
+        parseMbDate(a["first-release-date"]),
+    )
+    .slice(0, 25);
+
   const releases = await Promise.all(
-    (json["release-groups"] ?? []).map(async (item) => {
+    sortedItems.map(async (item) => {
       const hasCover = await coverArtExists(item.id);
 
       return {
@@ -186,5 +222,6 @@ export async function getArtistReleases(mbid: string): Promise<ArtistRelease[]> 
   );
 
   setCached(cacheKey, releases);
+
   return releases;
 }
