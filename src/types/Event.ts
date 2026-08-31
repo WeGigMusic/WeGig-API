@@ -6,12 +6,15 @@ export type EventSource =
 
 export type NormalizedEvent = {
   source: EventSource;
+
   sourceEventId: string;
 
   title: string;
 
   date?: string;
+
   time?: string;
+
   dateTime?: string;
 
   status?: string;
@@ -19,11 +22,14 @@ export type NormalizedEvent = {
   ticketUrl?: string;
 
   venueName?: string;
+
   city?: string;
+
   countryCode?: string;
 
   artists: {
     id?: string;
     name: string;
+    imageUrl?: string | null;
   }[];
 };

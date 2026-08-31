@@ -1,6 +1,9 @@
 import { env } from "./env";
 import { normaliseArtistName } from "./utils/normaliseArtistName";
-import { searchAppleMusicArtistImage } from "./appleMusic";
+import {
+  searchAppleMusicArtistImage,
+  searchAppleMusicReleaseImage,
+} from "./appleMusic";
 import {
   searchMbArtists,
   getArtistReleases,
@@ -118,7 +121,7 @@ function getArtistCacheKey(name: string): string {
 }
 
 function getArtistPageCacheKey(name: string): string {
-  return `${normaliseArtistName(name)}:v4`;
+  return `${normaliseArtistName(name)}:v5`;
 }
 
 function getCachedArtist(
@@ -729,6 +732,55 @@ async function getMusicBrainzReleasesForArtist(
   }
 }
 
+async function enrichReleaseArtwork(
+  releases: SpotifyArtistPageRelease[],
+  albums: SpotifyAlbum[],
+  artistName: string,
+): Promise<SpotifyArtistPageRelease[]> {
+  return Promise.all(
+    releases.map(async (release) => {
+      const releaseName =
+        normaliseArtistName(
+          release.title,
+        );
+
+      const spotifyAlbum =
+        albums.find(
+          (album) =>
+            normaliseArtistName(
+              album.name,
+            ) === releaseName,
+        );
+
+      const spotifyImage =
+        getBestSpotifyImage(
+          spotifyAlbum?.images,
+        );
+
+      if (spotifyImage) {
+        return {
+          ...release,
+          coverImageUrl: spotifyImage,
+        };
+      }
+
+      const appleImage =
+        await searchAppleMusicReleaseImage(
+          artistName,
+          release.title,
+        );
+
+      return {
+        ...release,
+        coverImageUrl:
+          appleImage ??
+          release.coverImageUrl ??
+          null,
+      };
+    }),
+  );
+}
+
 export async function getSpotifyArtistPage(
   name: string,
 ): Promise<SpotifyArtistPageResult> {
@@ -842,6 +894,13 @@ export async function getSpotifyArtistPage(
     await getMusicBrainzReleasesForArtist(
       best.name,
       query,
+    );
+
+  releases =
+    await enrichReleaseArtwork(
+      releases,
+      albums,
+      best.name,
     );
 
   const result: SpotifyArtistPageResult =

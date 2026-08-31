@@ -65,6 +65,50 @@ function optionalNumber(value: unknown): number | undefined {
   return Number.isFinite(next) ? next : undefined;
 }
 
+async function addSpotifyArtistImages(
+  events: NormalizedEvent[],
+): Promise<NormalizedEvent[]> {
+  const artistNames = [
+    ...new Set(
+      events
+        .flatMap((event) => event.artists ?? [])
+        .map((artist) => artist.name.trim())
+        .filter(Boolean),
+    ),
+  ];
+
+  if (artistNames.length === 0) {
+    return events;
+  }
+
+  const imageEntries = await Promise.all(
+    artistNames.map(async (artistName) => {
+      try {
+        const spotifyArtist = await searchSpotifyArtist(artistName);
+
+        return [norm(artistName), spotifyArtist?.imageUrl ?? null] as const;
+      } catch (error) {
+        console.error("[events/search] Spotify artist image failed", {
+          artistName,
+          message: error instanceof Error ? error.message : String(error),
+        });
+
+        return [norm(artistName), null] as const;
+      }
+    }),
+  );
+
+  const imageByArtist = new Map<string, string | null>(imageEntries);
+
+  return events.map((event) => ({
+    ...event,
+    artists: event.artists.map((artist) => ({
+      ...artist,
+      imageUrl: imageByArtist.get(norm(artist.name)) ?? null,
+    })),
+  }));
+}
+
 function setlistDateToYmdSafe(value: unknown): string | undefined {
   const raw = String(value ?? "").trim();
 
@@ -112,9 +156,11 @@ app.use(
     credentials: true,
   }),
 );
+
 app.use(express.json({ limit: "10mb" }));
 
 app.set("etag", false);
+
 app.use((_req: Request, res: Response, next: NextFunction) => {
   res.set("Cache-Control", "no-store, no-cache, must-revalidate, private");
   next();
@@ -242,15 +288,18 @@ app.post("/gigs", requireAuth, async (req: AuthedRequest, res: Response) => {
     errors.push("date must be a non-empty string");
   } else {
     const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+
     if (!dateRegex.test(gigInput.date.trim())) {
       errors.push("date must be in YYYY-MM-DD format");
     } else {
       const dateStr = gigInput.date.trim();
       const parsedDate = new Date(dateStr + "T00:00:00Z");
+
       if (Number.isNaN(parsedDate.getTime())) {
         errors.push("date must be a valid date");
       } else {
         const [y, m, d] = dateStr.split("-").map(Number);
+
         if (
           y !== parsedDate.getUTCFullYear() ||
           m !== parsedDate.getUTCMonth() + 1 ||
@@ -289,6 +338,7 @@ app.post("/gigs", requireAuth, async (req: AuthedRequest, res: Response) => {
   if (artistMbid) {
     const uuidRegex =
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
     if (!uuidRegex.test(artistMbid)) {
       errors.push("artistMbid must be a valid UUID");
     }
@@ -507,49 +557,61 @@ app.patch(
 
       const next: Gig = {
         id: existing.id,
+
         artist:
           typeof req.body.artist === "string"
             ? req.body.artist.trim()
             : existing.artist,
+
         venue:
           typeof req.body.venue === "string"
             ? req.body.venue.trim()
             : existing.venue,
+
         city:
           typeof req.body.city === "string"
             ? req.body.city.trim()
             : existing.city,
+
         date:
           typeof req.body.date === "string"
             ? req.body.date.trim()
             : existing.date,
+
         rating:
           req.body.rating !== undefined
             ? req.body.rating
             : existing.rating ?? undefined,
+
         notes:
           typeof req.body.notes === "string"
             ? req.body.notes.trim()
             : existing.notes ?? undefined,
+
         externalSource: existing.externalSource ?? undefined,
         externalId: existing.externalId ?? undefined,
         artistMbid: existing.artistMbid ?? undefined,
+
         ticketUrl:
           typeof req.body.ticketUrl === "string"
             ? req.body.ticketUrl.trim()
             : existing.ticketUrl ?? undefined,
+
         venueLatitude:
           typeof req.body.venueLatitude === "number"
             ? req.body.venueLatitude
             : existing.venueLatitude ?? undefined,
+
         venueLongitude:
           typeof req.body.venueLongitude === "number"
             ? req.body.venueLongitude
             : existing.venueLongitude ?? undefined,
+
         venuePlaceName:
           typeof req.body.venuePlaceName === "string"
             ? req.body.venuePlaceName.trim()
             : existing.venuePlaceName ?? undefined,
+
         venuePlaceId:
           typeof req.body.venuePlaceId === "string"
             ? req.body.venuePlaceId.trim()
@@ -557,11 +619,22 @@ app.patch(
       };
 
       const errors: string[] = [];
-      if (!next.artist?.trim()) errors.push("artist must be a non-empty string");
-      if (!next.venue?.trim()) errors.push("venue must be a non-empty string");
-      if (!next.city?.trim()) errors.push("city must be a non-empty string");
-      if (!next.date?.trim()) errors.push("date must be a non-empty string");
-      else if (!/^\d{4}-\d{2}-\d{2}$/.test(next.date)) {
+
+      if (!next.artist?.trim()) {
+        errors.push("artist must be a non-empty string");
+      }
+
+      if (!next.venue?.trim()) {
+        errors.push("venue must be a non-empty string");
+      }
+
+      if (!next.city?.trim()) {
+        errors.push("city must be a non-empty string");
+      }
+
+      if (!next.date?.trim()) {
+        errors.push("date must be a non-empty string");
+      } else if (!/^\d{4}-\d{2}-\d{2}$/.test(next.date)) {
         errors.push("date must be in YYYY-MM-DD format");
       }
 
@@ -684,7 +757,10 @@ app.patch(
       return res.json(responseGig);
     } catch (error) {
       console.error("Error updating gig in Prisma:", error);
-      return res.status(500).json({ error: "Failed to update gig" });
+
+      return res.status(500).json({
+        error: "Failed to update gig",
+      });
     }
   },
 );
@@ -705,17 +781,26 @@ app.delete(
       });
 
       if (!existing) {
-        return res.status(404).json({ error: "Gig not found" });
+        return res.status(404).json({
+          error: "Gig not found",
+        });
       }
 
       await prisma.gig.delete({
-        where: { id: existing.id },
+        where: {
+          id: existing.id,
+        },
       });
 
-      return res.status(200).json({ deletedId: id });
+      return res.status(200).json({
+        deletedId: id,
+      });
     } catch (error) {
       console.error("Error deleting gig in Prisma:", error);
-      return res.status(500).json({ error: "Failed to delete gig" });
+
+      return res.status(500).json({
+        error: "Failed to delete gig",
+      });
     }
   },
 );
@@ -727,7 +812,9 @@ app.post(
     const file = req.file;
 
     if (!file) {
-      return res.status(400).json({ message: "No ticket image uploaded" });
+      return res.status(400).json({
+        message: "No ticket image uploaded",
+      });
     }
 
     try {
@@ -747,6 +834,7 @@ app.post(
       });
     } catch (error: any) {
       console.error("OCR route failed:", error);
+
       return res.status(500).json({
         message: error?.message ?? "OCR failed",
       });
@@ -773,7 +861,8 @@ app.get("/events/search", async (req: Request, res: Response) => {
       artistMbid,
     } = req.query;
 
-    const searchMode = typeof mode === "string" && mode === "past" ? "past" : "future";
+    const searchMode =
+      typeof mode === "string" && mode === "past" ? "past" : "future";
 
     const kw =
       typeof q === "string"
@@ -844,6 +933,8 @@ app.get("/events/search", async (req: Request, res: Response) => {
 
       const events = dedupeEvents([...tmEvents, ...skiddleEvents]);
 
+      const eventsWithImages = await addSpotifyArtistImages(events);
+
       console.log("[events/search] future results", {
         ticketmaster: tmEvents.length,
         skiddle: skiddleEvents.length,
@@ -857,7 +948,7 @@ app.get("/events/search", async (req: Request, res: Response) => {
           skiddle: skiddleEvents.length,
           setlistfm: 0,
         },
-        events,
+        events: eventsWithImages,
       });
     }
 
@@ -938,9 +1029,9 @@ app.get("/tm/events/search", async (req: Request, res: Response) => {
 
     return res.json(data);
   } catch (e: any) {
-    return res
-      .status(502)
-      .json({ message: e?.message ?? "Ticketmaster search failed" });
+    return res.status(502).json({
+      message: e?.message ?? "Ticketmaster search failed",
+    });
   }
 });
 
@@ -988,7 +1079,8 @@ app.get("/discover/events", async (req: Request, res: Response) => {
         unit: unit === "miles" || unit === "km" ? unit : undefined,
         startDateTime:
           typeof startDateTime === "string" ? startDateTime : undefined,
-        endDateTime: typeof endDateTime === "string" ? endDateTime : undefined,
+        endDateTime:
+          typeof endDateTime === "string" ? endDateTime : undefined,
         size: typeof size === "string" ? Number(size) : undefined,
       }),
 
@@ -1037,9 +1129,9 @@ app.get("/tm/events/:id", async (req: Request, res: Response) => {
     const data = await getTmEventByIdUk(req.params.id);
     return res.json(data);
   } catch (e: any) {
-    return res
-      .status(502)
-      .json({ message: e?.message ?? "Ticketmaster event lookup failed" });
+    return res.status(502).json({
+      message: e?.message ?? "Ticketmaster event lookup failed",
+    });
   }
 });
 
@@ -1048,7 +1140,11 @@ app.get("/tm/venues/search", async (req: Request, res: Response) => {
     const { q, keyword, city, size } = req.query;
 
     const query =
-      typeof q === "string" ? q : typeof keyword === "string" ? keyword : "";
+      typeof q === "string"
+        ? q
+        : typeof keyword === "string"
+          ? keyword
+          : "";
 
     const data = await searchTmVenuesUk({
       q: query,
@@ -1058,24 +1154,32 @@ app.get("/tm/venues/search", async (req: Request, res: Response) => {
 
     return res.json(data);
   } catch (e: any) {
-    return res
-      .status(502)
-      .json({ message: e?.message ?? "Ticketmaster venue search failed" });
+    return res.status(502).json({
+      message: e?.message ?? "Ticketmaster venue search failed",
+    });
   }
 });
 
 app.get("/mb/artists/search", async (req, res) => {
   try {
     const q = String(req.query.q ?? "").trim();
-    const limit = req.query.limit != null ? Number(req.query.limit) : undefined;
+
+    const limit =
+      req.query.limit != null
+        ? Number(req.query.limit)
+        : undefined;
 
     if (!q) {
-      return res
-        .status(400)
-        .json({ message: "Missing required query param: q" });
+      return res.status(400).json({
+        message: "Missing required query param: q",
+      });
     }
 
-    const result = await searchMbArtists({ q, limit });
+    const result = await searchMbArtists({
+      q,
+      limit,
+    });
+
     return res.json(result);
   } catch (err: any) {
     console.error("MusicBrainz search error:", err);
@@ -1092,12 +1196,16 @@ app.get("/mb/artists/:mbid/releases", async (req: Request, res: Response) => {
     const mbid = String(req.params.mbid ?? "").trim();
 
     if (!mbid) {
-      return res.status(400).json({ message: "Missing artist MBID" });
+      return res.status(400).json({
+        message: "Missing artist MBID",
+      });
     }
 
     const releases = await getArtistReleases(mbid);
 
-    return res.json({ releases });
+    return res.json({
+      releases,
+    });
   } catch (err: any) {
     console.error("MusicBrainz releases error:", err);
 
@@ -1113,11 +1221,16 @@ app.get("/spotify/artist", async (req: Request, res: Response) => {
     const name = String(req.query.name ?? "").trim();
 
     if (!name) {
-      return res.status(400).json({ message: "Missing artist name" });
+      return res.status(400).json({
+        message: "Missing artist name",
+      });
     }
 
     const artist = await searchSpotifyArtist(name);
-    return res.json({ artist });
+
+    return res.json({
+      artist,
+    });
   } catch (e: any) {
     return res.status(502).json({
       message: e?.message ?? "Spotify artist lookup failed",
@@ -1130,10 +1243,13 @@ app.get("/spotify/artist-page", async (req: Request, res: Response) => {
     const name = String(req.query.name ?? "").trim();
 
     if (!name) {
-      return res.status(400).json({ message: "Missing artist name" });
+      return res.status(400).json({
+        message: "Missing artist name",
+      });
     }
 
     const result = await getSpotifyArtistPage(name);
+
     return res.json(result);
   } catch (e: any) {
     return res.status(502).json({
@@ -1152,13 +1268,18 @@ app.get("/setlist/artist", async (req: Request, res: Response) => {
         : undefined;
 
     const city =
-      typeof req.query.city === "string" ? req.query.city.trim() : undefined;
+      typeof req.query.city === "string"
+        ? req.query.city.trim()
+        : undefined;
 
     const venue =
-      typeof req.query.venue === "string" ? req.query.venue.trim() : undefined;
+      typeof req.query.venue === "string"
+        ? req.query.venue.trim()
+        : undefined;
 
     const page =
-      typeof req.query.page === "string" && Number.isFinite(Number(req.query.page))
+      typeof req.query.page === "string" &&
+      Number.isFinite(Number(req.query.page))
         ? Math.max(1, Number(req.query.page))
         : 1;
 
@@ -1170,11 +1291,15 @@ app.get("/setlist/artist", async (req: Request, res: Response) => {
       });
     }
 
-    const result = await searchSetlistsByArtist(artist, artistMbid, {
-      city,
-      venue,
-      page,
-    });
+    const result = await searchSetlistsByArtist(
+      artist,
+      artistMbid,
+      {
+        city,
+        venue,
+        page,
+      },
+    );
 
     return res.status(200).json({
       success: true,
@@ -1205,10 +1330,16 @@ app.get("/setlist/gig-match", async (req: Request, res: Response) => {
   try {
     const artist = String(req.query.artist ?? "").trim();
     const date = String(req.query.date ?? "").trim();
+
     const city =
-      typeof req.query.city === "string" ? req.query.city.trim() : undefined;
+      typeof req.query.city === "string"
+        ? req.query.city.trim()
+        : undefined;
+
     const venue =
-      typeof req.query.venue === "string" ? req.query.venue.trim() : undefined;
+      typeof req.query.venue === "string"
+        ? req.query.venue.trim()
+        : undefined;
 
     if (!artist || !date) {
       return res.status(400).json({
@@ -1262,11 +1393,16 @@ app.get("/lastfm/similar-artists", async (req: Request, res: Response) => {
     const artist = String(req.query.artist ?? "").trim();
 
     if (!artist) {
-      return res.status(400).json({ message: "Missing artist" });
+      return res.status(400).json({
+        message: "Missing artist",
+      });
     }
 
     const artists = await getLastFmSimilarArtists(artist);
-    return res.json({ artists });
+
+    return res.json({
+      artists,
+    });
   } catch (e: any) {
     return res.status(502).json({
       message: e?.message ?? "Last.fm similar artists lookup failed",
@@ -1276,7 +1412,10 @@ app.get("/lastfm/similar-artists", async (req: Request, res: Response) => {
 
 app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
   console.error("Unhandled error:", err);
-  res.status(500).json({ message: "Internal Server Error" });
+
+  res.status(500).json({
+    message: "Internal Server Error",
+  });
 });
 
 app.listen(PORT, "0.0.0.0", () => {

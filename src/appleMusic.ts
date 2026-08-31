@@ -19,10 +19,27 @@ type AppleMusicArtist = {
   };
 };
 
+type AppleMusicAlbum = {
+  id: string;
+  attributes?: {
+    name?: string;
+    artistName?: string;
+    artwork?: AppleMusicArtwork;
+  };
+};
+
 type AppleMusicSearchResponse = {
   results?: {
     artists?: {
       data?: AppleMusicArtist[];
+    };
+  };
+};
+
+type AppleMusicAlbumSearchResponse = {
+  results?: {
+    albums?: {
+      data?: AppleMusicAlbum[];
     };
   };
 };
@@ -42,7 +59,10 @@ const TOKEN_LIFETIME_SECONDS = 30 * 24 * 60 * 60;
 const FETCH_TIMEOUT_MS = 8_000;
 
 function isConfigured(): boolean {
-  return Boolean(env.appleMusicTeamId && env.appleMusicKeyId);
+  return Boolean(
+    env.appleMusicTeamId &&
+      env.appleMusicKeyId,
+  );
 }
 
 function getPrivateKeyPath(): string {
@@ -58,13 +78,20 @@ async function getPrivateKey(): Promise<string> {
     return cachedPrivateKey;
   }
 
-  cachedPrivateKey = await readFile(getPrivateKeyPath(), "utf8");
+  cachedPrivateKey = await readFile(
+    getPrivateKeyPath(),
+    "utf8",
+  );
 
   return cachedPrivateKey;
 }
 
-function base64Url(value: string | Buffer): string {
-  return Buffer.from(value).toString("base64url");
+function base64Url(
+  value: string | Buffer,
+): string {
+  return Buffer.from(value).toString(
+    "base64url",
+  );
 }
 
 async function getDeveloperToken(): Promise<string> {
@@ -78,13 +105,19 @@ async function getDeveloperToken(): Promise<string> {
   }
 
   if (!isConfigured()) {
-    throw new Error("Apple Music is not configured");
+    throw new Error(
+      "Apple Music is not configured",
+    );
   }
 
   const privateKey = await getPrivateKey();
 
-  const issuedAt = Math.floor(Date.now() / 1000);
-  const expiresAt = issuedAt + TOKEN_LIFETIME_SECONDS;
+  const issuedAt = Math.floor(
+    Date.now() / 1000,
+  );
+
+  const expiresAt =
+    issuedAt + TOKEN_LIFETIME_SECONDS;
 
   const header = {
     alg: "ES256",
@@ -98,12 +131,19 @@ async function getDeveloperToken(): Promise<string> {
     exp: expiresAt,
   };
 
-  const encodedHeader = base64Url(JSON.stringify(header));
-  const encodedPayload = base64Url(JSON.stringify(payload));
+  const encodedHeader = base64Url(
+    JSON.stringify(header),
+  );
 
-  const unsignedToken = `${encodedHeader}.${encodedPayload}`;
+  const encodedPayload = base64Url(
+    JSON.stringify(payload),
+  );
 
-  const privateKeyObject = createPrivateKey(privateKey);
+  const unsignedToken =
+    `${encodedHeader}.${encodedPayload}`;
+
+  const privateKeyObject =
+    createPrivateKey(privateKey);
 
   const signature = sign(
     "sha256",
@@ -114,9 +154,11 @@ async function getDeveloperToken(): Promise<string> {
     },
   );
 
-  const token = `${unsignedToken}.${base64Url(signature)}`;
+  const token =
+    `${unsignedToken}.${base64Url(signature)}`;
 
   cachedDeveloperToken = token;
+
   cachedDeveloperTokenExpiryMs =
     expiresAt * 1000 - 60_000;
 
@@ -125,25 +167,35 @@ async function getDeveloperToken(): Promise<string> {
 
 async function appleMusicGet<T>(
   path: string,
-  query?: Record<string, string | number | undefined>,
+  query?: Record<
+    string,
+    string | number | undefined
+  >,
 ): Promise<T> {
-  const token = await getDeveloperToken();
+  const token =
+    await getDeveloperToken();
 
   const url = new URL(
     `https://api.music.apple.com/v1${path}`,
   );
 
-  Object.entries(query ?? {}).forEach(([key, value]) => {
-    if (
-      value !== undefined &&
-      value !== null &&
-      value !== ""
-    ) {
-      url.searchParams.set(key, String(value));
-    }
-  });
+  Object.entries(query ?? {}).forEach(
+    ([key, value]) => {
+      if (
+        value !== undefined &&
+        value !== null &&
+        value !== ""
+      ) {
+        url.searchParams.set(
+          key,
+          String(value),
+        );
+      }
+    },
+  );
 
-  const controller = new AbortController();
+  const controller =
+    new AbortController();
 
   const timeout = setTimeout(() => {
     controller.abort();
@@ -158,7 +210,10 @@ async function appleMusicGet<T>(
     });
 
     if (!response.ok) {
-      const text = await response.text().catch(() => "");
+      const text =
+        await response.text().catch(
+          () => "",
+        );
 
       throw new Error(
         `Apple Music GET failed: ${response.status} ${path} ${text}`,
@@ -172,7 +227,9 @@ async function appleMusicGet<T>(
 }
 
 function artworkUrl(
-  artwork: AppleMusicArtwork | undefined,
+  artwork:
+    | AppleMusicArtwork
+    | undefined,
 ): string | null {
   const url = artwork?.url?.trim();
 
@@ -185,7 +242,9 @@ function artworkUrl(
     .replace("{h}", "1200");
 }
 
-function tokenize(value: string): string[] {
+function tokenize(
+  value: string,
+): string[] {
   return normaliseArtistName(value)
     .split(" ")
     .map((part) => part.trim())
@@ -196,30 +255,47 @@ function scoreArtist(
   query: string,
   artist: AppleMusicArtist,
 ): number {
-  const artistName = artist.attributes?.name ?? "";
+  const artistName =
+    artist.attributes?.name ?? "";
 
-  const queryNormalized = normaliseArtistName(query);
+  const queryNormalized =
+    normaliseArtistName(query);
+
   const artistNormalized =
     normaliseArtistName(artistName);
 
-  if (!queryNormalized || !artistNormalized) {
+  if (
+    !queryNormalized ||
+    !artistNormalized
+  ) {
     return 0;
   }
 
-  if (queryNormalized === artistNormalized) {
+  if (
+    queryNormalized === artistNormalized
+  ) {
     return 1000;
   }
 
-  const queryTokens = tokenize(query);
-  const artistTokens = tokenize(artistName);
+  const queryTokens =
+    tokenize(query);
 
-  const sharedTokens = queryTokens.filter((token) =>
-    artistTokens.includes(token),
-  );
+  const artistTokens =
+    tokenize(artistName);
 
-  let score = sharedTokens.length * 100;
+  const sharedTokens =
+    queryTokens.filter((token) =>
+      artistTokens.includes(token),
+    );
 
-  if (artistNormalized.startsWith(queryNormalized)) {
+  let score =
+    sharedTokens.length * 100;
+
+  if (
+    artistNormalized.startsWith(
+      queryNormalized,
+    )
+  ) {
     score += 100;
   }
 
@@ -240,7 +316,10 @@ export async function searchAppleMusicArtistImage(
 ): Promise<AppleMusicArtistImageResult | null> {
   const query = name.trim();
 
-  if (!query || !isConfigured()) {
+  if (
+    !query ||
+    !isConfigured()
+  ) {
     return null;
   }
 
@@ -256,7 +335,8 @@ export async function searchAppleMusicArtistImage(
       );
 
     const artists =
-      response.results?.artists?.data ?? [];
+      response.results?.artists?.data ??
+      [];
 
     if (artists.length === 0) {
       return null;
@@ -265,27 +345,39 @@ export async function searchAppleMusicArtistImage(
     const ranked = artists
       .map((artist) => ({
         artist,
-        score: scoreArtist(query, artist),
+        score: scoreArtist(
+          query,
+          artist,
+        ),
       }))
-      .sort((a, b) => b.score - a.score);
+      .sort(
+        (a, b) =>
+          b.score - a.score,
+      );
 
     const best = ranked[0];
 
-    if (!best || best.score < 200) {
+    if (
+      !best ||
+      best.score < 200
+    ) {
       console.warn(
         "[apple-music] rejected weak artist match",
         {
           query,
           candidate:
-            best?.artist.attributes?.name ?? null,
-          score: best?.score ?? null,
+            best?.artist.attributes
+              ?.name ?? null,
+          score:
+            best?.score ?? null,
         },
       );
 
       return null;
     }
 
-    const attributes = best.artist.attributes;
+    const attributes =
+      best.artist.attributes;
 
     if (!attributes?.name) {
       return null;
@@ -294,14 +386,115 @@ export async function searchAppleMusicArtistImage(
     return {
       id: best.artist.id,
       name: attributes.name,
-      imageUrl: artworkUrl(attributes.artwork),
-      genres: attributes.genreNames ?? [],
+      imageUrl: artworkUrl(
+        attributes.artwork,
+      ),
+      genres:
+        attributes.genreNames ??
+        [],
     };
   } catch (error) {
     console.error(
       "[apple-music] artist lookup failed",
       {
         query,
+        message:
+          error instanceof Error
+            ? error.message
+            : String(error),
+      },
+    );
+
+    return null;
+  }
+}
+
+export async function searchAppleMusicReleaseImage(
+  artistName: string,
+  releaseTitle: string,
+): Promise<string | null> {
+  const artist =
+    artistName.trim();
+
+  const title =
+    releaseTitle.trim();
+
+  if (
+    !artist ||
+    !title ||
+    !isConfigured()
+  ) {
+    return null;
+  }
+
+  try {
+    const response =
+      await appleMusicGet<AppleMusicAlbumSearchResponse>(
+        `/catalog/${env.appleMusicStorefront}/search`,
+        {
+          term: `${artist} ${title}`,
+          types: "albums",
+          limit: 10,
+        },
+      );
+
+    const albums =
+      response.results?.albums?.data ??
+      [];
+
+    if (albums.length === 0) {
+      return null;
+    }
+
+    const expectedArtist =
+      normaliseArtistName(artist);
+
+    const expectedTitle =
+      normaliseArtistName(title);
+
+    const exactMatch =
+      albums.find((album) => {
+        const albumArtist =
+          normaliseArtistName(
+            album.attributes
+              ?.artistName ?? "",
+          );
+
+        const albumTitle =
+          normaliseArtistName(
+            album.attributes
+              ?.name ?? "",
+          );
+
+        return (
+          albumArtist ===
+            expectedArtist &&
+          albumTitle ===
+            expectedTitle
+        );
+      });
+
+    if (!exactMatch) {
+      console.warn(
+        "[apple-music] no exact release match",
+        {
+          artist,
+          title,
+        },
+      );
+
+      return null;
+    }
+
+    return artworkUrl(
+      exactMatch.attributes?.artwork,
+    );
+  } catch (error) {
+    console.warn(
+      "[apple-music] release artwork lookup failed",
+      {
+        artist,
+        title,
         message:
           error instanceof Error
             ? error.message
