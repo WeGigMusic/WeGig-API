@@ -55,9 +55,17 @@ export const env = {
   // apple music
   appleMusicTeamId: optional("APPLE_MUSIC_TEAM_ID"),
   appleMusicKeyId: optional("APPLE_MUSIC_KEY_ID"),
+
+  // NEW: full .p8 key contents can live in Render env vars
+  appleMusicPrivateKey: optional(
+    "APPLE_MUSIC_PRIVATE_KEY",
+  ),
+
+  // existing secret-file option
   appleMusicPrivateKeyPath: optional(
     "APPLE_MUSIC_PRIVATE_KEY_PATH",
   ),
+
   appleMusicStorefront: optional(
     "APPLE_MUSIC_STOREFRONT",
     "gb",
