@@ -47,6 +47,9 @@ const COVER_ART_BASE =
 const ONE_DAY_MS =
   24 * 60 * 60 * 1000;
 
+const RAG_N_BONE_MAN_MBID =
+  "37993cdf-f61a-488f-8cca-07e03b8aaa02";
+
 type CacheEntry<T> = {
   expiresAt: number;
   data: T;
@@ -129,6 +132,21 @@ function normaliseForMatch(
   );
 }
 
+function normaliseExactArtistQuery(
+  value: string,
+) {
+  return value
+    .toLowerCase()
+    .replace(/[’']/g, " ")
+    .replace(/&/g, " and ")
+    .replace(
+      /[^a-z0-9]+/g,
+      " ",
+    )
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function stripLeadingThe(
   value: string,
 ) {
@@ -160,34 +178,6 @@ function namesMatch(
     stripLeadingThe(left) ===
     stripLeadingThe(right)
   );
-}
-
-function getKnownArtist(
-  query: string,
-): MbArtist | null {
-  const key = query
-    .toLowerCase()
-    .replace(/[’']/g, " ")
-    .replace(
-      /[^a-z0-9]+/g,
-      " ",
-    )
-    .replace(/\s+/g, " ")
-    .trim();
-
-  if (
-    key ===
-    "rag n bone man"
-  ) {
-    return {
-      id: "37993cdf-f61a-488f-8cca-07e03b8aaa02",
-      name: "Rag'n'Bone Man",
-      country: "GB",
-      score: 100,
-    };
-  }
-
-  return null;
 }
 
 function scoreArtistMatch(
@@ -336,14 +326,51 @@ export async function searchMbArtists(
   const q =
     params.q.trim();
 
-  const knownArtist =
-    getKnownArtist(q);
+  if (!q) {
+    return {
+      count: 0,
+      artists: [],
+    };
+  }
 
-  if (knownArtist) {
+  /*
+   * Important:
+   * MusicBrainz incorrectly ranks the unrelated
+   * Scottish artist "The Rag n Bone Man" above
+   * Rory Graham when punctuation is omitted.
+   *
+   * Resolve this known collision before cache
+   * lookup or any MusicBrainz network request.
+   */
+  const exactQuery =
+    normaliseExactArtistQuery(
+      q,
+    );
+
+  if (
+    exactQuery ===
+    "rag n bone man"
+  ) {
+    console.log(
+      "[musicbrainz] Rag'n'Bone Man override",
+      {
+        query: q,
+        mbid:
+          RAG_N_BONE_MAN_MBID,
+      },
+    );
+
     return {
       count: 1,
       artists: [
-        knownArtist,
+        {
+          id:
+            RAG_N_BONE_MAN_MBID,
+          name:
+            "Rag'n'Bone Man",
+          country: "GB",
+          score: 100,
+        },
       ],
     };
   }
@@ -357,15 +384,8 @@ export async function searchMbArtists(
       25,
     );
 
-  if (!q) {
-    return {
-      count: 0,
-      artists: [],
-    };
-  }
-
   const cacheKey =
-    `mb:artist:v5:${normaliseForMatch(
+    `mb:artist:v6:${normaliseForMatch(
       q,
     )}:${limit}`;
 
