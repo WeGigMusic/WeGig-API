@@ -31,3 +31,19 @@ model Gig {
   @@index([userId, artist, date])
   @@unique([userId, externalSource, externalId])
 }
+
+model Artist {
+  id             String   @id @default(uuid())
+  name           String
+  normalizedName String   @unique
+  mbid           String?
+  imageUrl       String?
+  imageSource    String?
+  spotifyId      String?
+  imageUpdatedAt DateTime?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  @@index([name])
+  @@index([mbid])
+}
