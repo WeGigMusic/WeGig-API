@@ -78,9 +78,38 @@ async function getPrivateKey(): Promise<string> {
     return cachedPrivateKey;
   }
 
-  cachedPrivateKey = await readFile(
-    getPrivateKeyPath(),
+  const path = getPrivateKeyPath();
+
+  const rawKey = await readFile(
+    path,
     "utf8",
+  );
+
+  const cleanedKey = rawKey
+    .replace(/\r\n/g, "\n")
+    .trim();
+
+  if (
+    !cleanedKey.includes(
+      "-----BEGIN PRIVATE KEY-----",
+    ) ||
+    !cleanedKey.includes(
+      "-----END PRIVATE KEY-----",
+    )
+  ) {
+    throw new Error(
+      `Apple Music private key at ${path} is not a valid .p8 PEM key`,
+    );
+  }
+
+  cachedPrivateKey = cleanedKey;
+
+  console.log(
+    "[apple-music] private key loaded",
+    {
+      path,
+      length: cleanedKey.length,
+    },
   );
 
   return cachedPrivateKey;
@@ -142,8 +171,11 @@ async function getDeveloperToken(): Promise<string> {
   const unsignedToken =
     `${encodedHeader}.${encodedPayload}`;
 
-  const privateKeyObject =
-    createPrivateKey(privateKey);
+  const privateKeyObject = createPrivateKey({
+    key: privateKey,
+    format: "pem",
+    type: "pkcs8",
+  });
 
   const signature = sign(
     "sha256",
@@ -227,9 +259,7 @@ async function appleMusicGet<T>(
 }
 
 function artworkUrl(
-  artwork:
-    | AppleMusicArtwork
-    | undefined,
+  artwork: AppleMusicArtwork | undefined,
 ): string | null {
   const url = artwork?.url?.trim();
 
@@ -311,6 +341,61 @@ function scoreArtist(
   return score;
 }
 
+function findMatchingAppleAlbum(
+  albums: AppleMusicAlbum[],
+  artistName: string,
+  releaseTitle: string,
+): AppleMusicAlbum | null {
+  const expectedArtist =
+    normaliseArtistName(artistName);
+
+  const expectedTitle =
+    normaliseArtistName(releaseTitle);
+
+  const matchingArtistAlbums =
+    albums.filter((album) => {
+      const albumArtist =
+        normaliseArtistName(
+          album.attributes?.artistName ?? "",
+        );
+
+      return albumArtist === expectedArtist;
+    });
+
+  const exactMatch =
+    matchingArtistAlbums.find((album) => {
+      const albumTitle =
+        normaliseArtistName(
+          album.attributes?.name ?? "",
+        );
+
+      return albumTitle === expectedTitle;
+    });
+
+  if (exactMatch) {
+    return exactMatch;
+  }
+
+  const relaxedMatch =
+    matchingArtistAlbums.find((album) => {
+      const albumTitle =
+        normaliseArtistName(
+          album.attributes?.name ?? "",
+        );
+
+      if (!albumTitle || !expectedTitle) {
+        return false;
+      }
+
+      return (
+        albumTitle.includes(expectedTitle) ||
+        expectedTitle.includes(albumTitle)
+      );
+    });
+
+  return relaxedMatch ?? null;
+}
+
 export async function searchAppleMusicArtistImage(
   name: string,
 ): Promise<AppleMusicArtistImageResult | null> {
@@ -366,8 +451,8 @@ export async function searchAppleMusicArtistImage(
         {
           query,
           candidate:
-            best?.artist.attributes
-              ?.name ?? null,
+            best?.artist.attributes?.name ??
+            null,
           score:
             best?.score ?? null,
         },
@@ -390,8 +475,7 @@ export async function searchAppleMusicArtistImage(
         attributes.artwork,
       ),
       genres:
-        attributes.genreNames ??
-        [],
+        attributes.genreNames ?? [],
     };
   } catch (error) {
     console.error(
@@ -446,37 +530,16 @@ export async function searchAppleMusicReleaseImage(
       return null;
     }
 
-    const expectedArtist =
-      normaliseArtistName(artist);
+    const match =
+      findMatchingAppleAlbum(
+        albums,
+        artist,
+        title,
+      );
 
-    const expectedTitle =
-      normaliseArtistName(title);
-
-    const exactMatch =
-      albums.find((album) => {
-        const albumArtist =
-          normaliseArtistName(
-            album.attributes
-              ?.artistName ?? "",
-          );
-
-        const albumTitle =
-          normaliseArtistName(
-            album.attributes
-              ?.name ?? "",
-          );
-
-        return (
-          albumArtist ===
-            expectedArtist &&
-          albumTitle ===
-            expectedTitle
-        );
-      });
-
-    if (!exactMatch) {
+    if (!match) {
       console.warn(
-        "[apple-music] no exact release match",
+        "[apple-music] no release artwork match",
         {
           artist,
           title,
@@ -486,9 +549,28 @@ export async function searchAppleMusicReleaseImage(
       return null;
     }
 
-    return artworkUrl(
-      exactMatch.attributes?.artwork,
+    const image =
+      artworkUrl(
+        match.attributes?.artwork,
+      );
+
+    if (!image) {
+      return null;
+    }
+
+    console.log(
+      "[apple-music] release artwork matched",
+      {
+        artist,
+        requestedTitle:
+          title,
+        matchedTitle:
+          match.attributes?.name ??
+          null,
+      },
     );
+
+    return image;
   } catch (error) {
     console.warn(
       "[apple-music] release artwork lookup failed",

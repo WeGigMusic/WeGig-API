@@ -111,17 +111,27 @@ let cachedToken: string | null = null;
 let tokenExpiryMs = 0;
 
 const artistCache = new Map<string, CachedArtistEntry>();
-const artistPageCache = new Map<string, CachedArtistPageEntry>();
+const artistPageCache = new Map<
+  string,
+  CachedArtistPageEntry
+>();
 
-const ARTIST_CACHE_TTL_MS = 24 * 60 * 60 * 1000;
-const ARTIST_PAGE_CACHE_TTL_MS = 6 * 60 * 60 * 1000;
+const ARTIST_CACHE_TTL_MS =
+  24 * 60 * 60 * 1000;
 
-function getArtistCacheKey(name: string): string {
+const ARTIST_PAGE_CACHE_TTL_MS =
+  6 * 60 * 60 * 1000;
+
+function getArtistCacheKey(
+  name: string,
+): string {
   return normaliseArtistName(name);
 }
 
-function getArtistPageCacheKey(name: string): string {
-  return `${normaliseArtistName(name)}:v5`;
+function getArtistPageCacheKey(
+  name: string,
+): string {
+  return `${normaliseArtistName(name)}:v8`;
 }
 
 function getCachedArtist(
@@ -146,17 +156,25 @@ function setCachedArtist(
   name: string,
   value: SpotifyArtistResult,
 ) {
-  artistCache.set(getArtistCacheKey(name), {
-    value,
-    expiresAt: Date.now() + ARTIST_CACHE_TTL_MS,
-  });
+  artistCache.set(
+    getArtistCacheKey(name),
+    {
+      value,
+      expiresAt:
+        Date.now() +
+        ARTIST_CACHE_TTL_MS,
+    },
+  );
 }
 
 function getCachedArtistPage(
   name: string,
 ): SpotifyArtistPageResult | undefined {
-  const key = getArtistPageCacheKey(name);
-  const cached = artistPageCache.get(key);
+  const key =
+    getArtistPageCacheKey(name);
+
+  const cached =
+    artistPageCache.get(key);
 
   if (!cached) {
     return undefined;
@@ -174,23 +192,30 @@ function setCachedArtistPage(
   name: string,
   value: SpotifyArtistPageResult,
 ) {
-  if (
-    value.topTracks.length === 0 &&
-    value.releases.length === 0
-  ) {
+  // Important:
+  // never cache an artist page if Releases failed.
+  if (value.releases.length === 0) {
     return;
   }
 
-  artistPageCache.set(getArtistPageCacheKey(name), {
-    value,
-    expiresAt: Date.now() + ARTIST_PAGE_CACHE_TTL_MS,
-  });
+  artistPageCache.set(
+    getArtistPageCacheKey(name),
+    {
+      value,
+      expiresAt:
+        Date.now() +
+        ARTIST_PAGE_CACHE_TTL_MS,
+    },
+  );
 }
 
 async function getSpotifyAccessToken(): Promise<string> {
   const now = Date.now();
 
-  if (cachedToken && now < tokenExpiryMs) {
+  if (
+    cachedToken &&
+    now < tokenExpiryMs
+  ) {
     return cachedToken;
   }
 
@@ -212,19 +237,23 @@ async function getSpotifyAccessToken(): Promise<string> {
   );
 
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
+    const text =
+      await res.text().catch(() => "");
 
     throw new Error(
       `Spotify token failed: ${res.status} ${text}`,
     );
   }
 
-  const json = (await res.json()) as SpotifyTokenResponse;
+  const json =
+    (await res.json()) as SpotifyTokenResponse;
 
   cachedToken = json.access_token;
 
   tokenExpiryMs =
-    now + json.expires_in * 1000 - 60_000;
+    now +
+    json.expires_in * 1000 -
+    60_000;
 
   return cachedToken;
 }
@@ -236,7 +265,8 @@ async function spotifyGet<T>(
     string | number | undefined
   >,
 ): Promise<T> {
-  const token = await getSpotifyAccessToken();
+  const token =
+    await getSpotifyAccessToken();
 
   const url = new URL(
     `https://api.spotify.com/v1${path}`,
@@ -249,19 +279,26 @@ async function spotifyGet<T>(
         value !== null &&
         value !== ""
       ) {
-        url.searchParams.set(key, String(value));
+        url.searchParams.set(
+          key,
+          String(value),
+        );
       }
     },
   );
 
-  const res = await fetch(url.toString(), {
-    headers: {
-      Authorization: `Bearer ${token}`,
+  const res = await fetch(
+    url.toString(),
+    {
+      headers: {
+        Authorization: `Bearer ${token}`,
+      },
     },
-  });
+  );
 
   if (!res.ok) {
-    const text = await res.text().catch(() => "");
+    const text =
+      await res.text().catch(() => "");
 
     throw new Error(
       `Spotify GET failed: ${res.status} ${path} ${text}`,
@@ -284,17 +321,25 @@ function scoreArtistMatch(
   query: string,
   artist: SpotifyArtist,
 ): number {
-  const q = normaliseArtistName(query);
-  const name = normaliseArtistName(artist.name);
+  const q =
+    normaliseArtistName(query);
+
+  const name =
+    normaliseArtistName(
+      artist.name,
+    );
 
   if (!q || !name) {
     return 0;
   }
 
-  const qTokens = tokenizeArtistName(query);
-  const nameTokens = tokenizeArtistName(
-    artist.name,
-  );
+  const qTokens =
+    tokenizeArtistName(query);
+
+  const nameTokens =
+    tokenizeArtistName(
+      artist.name,
+    );
 
   let score = 0;
 
@@ -302,11 +347,13 @@ function scoreArtistMatch(
     score += 2000;
   }
 
-  const sharedTokenCount = qTokens.filter(
-    (token) => nameTokens.includes(token),
-  ).length;
+  const sharedTokenCount =
+    qTokens.filter((token) =>
+      nameTokens.includes(token),
+    ).length;
 
-  score += sharedTokenCount * 80;
+  score +=
+    sharedTokenCount * 80;
 
   if (name.startsWith(q)) {
     score += 120;
@@ -333,8 +380,13 @@ function isStrongArtistMatch(
   query: string,
   artist: SpotifyArtist,
 ): boolean {
-  const q = normaliseArtistName(query);
-  const name = normaliseArtistName(artist.name);
+  const q =
+    normaliseArtistName(query);
+
+  const name =
+    normaliseArtistName(
+      artist.name,
+    );
 
   if (!q || !name) {
     return false;
@@ -344,10 +396,13 @@ function isStrongArtistMatch(
     return true;
   }
 
-  const qTokens = tokenizeArtistName(query);
-  const nameTokens = tokenizeArtistName(
-    artist.name,
-  );
+  const qTokens =
+    tokenizeArtistName(query);
+
+  const nameTokens =
+    tokenizeArtistName(
+      artist.name,
+    );
 
   if (
     qTokens.length >= 2 &&
@@ -358,25 +413,37 @@ function isStrongArtistMatch(
     return true;
   }
 
-  return scoreArtistMatch(query, artist) >= 240;
+  return (
+    scoreArtistMatch(
+      query,
+      artist,
+    ) >= 240
+  );
 }
 
 function getBestSpotifyImage(
   images?: SpotifyImage[],
 ): string | null {
-  if (!images || images.length === 0) {
+  if (
+    !images ||
+    images.length === 0
+  ) {
     return null;
   }
 
-  const sorted = [...images].sort((a, b) => {
-    const aSize =
-      (a.width ?? 0) * (a.height ?? 0);
+  const sorted = [...images].sort(
+    (a, b) => {
+      const aSize =
+        (a.width ?? 0) *
+        (a.height ?? 0);
 
-    const bSize =
-      (b.width ?? 0) * (b.height ?? 0);
+      const bSize =
+        (b.width ?? 0) *
+        (b.height ?? 0);
 
-    return bSize - aSize;
-  });
+      return bSize - aSize;
+    },
+  );
 
   return sorted[0]?.url ?? null;
 }
@@ -387,18 +454,28 @@ function mapSpotifyArtistResult(
   return {
     id: artist.id,
     name: artist.name,
-    imageUrl: getBestSpotifyImage(
-      artist.images,
-    ),
-    genres: artist.genres ?? [],
+
+    imageUrl:
+      getBestSpotifyImage(
+        artist.images,
+      ),
+
+    genres:
+      artist.genres ?? [],
+
     popularity:
-      typeof artist.popularity === "number"
+      typeof artist.popularity ===
+      "number"
         ? artist.popularity
         : null,
+
     spotifyUrl:
-      artist.external_urls?.spotify ?? null,
+      artist.external_urls
+        ?.spotify ?? null,
+
     followers:
-      typeof artist.followers?.total === "number"
+      typeof artist.followers
+        ?.total === "number"
         ? artist.followers.total
         : null,
   };
@@ -409,19 +486,21 @@ function dedupeAlbums(
 ): SpotifyAlbum[] {
   const seen = new Set<string>();
 
-  return albums.filter((album) => {
-    const key =
-      `${normaliseArtistName(album.name)}::` +
-      `${album.album_type ?? ""}`;
+  return albums.filter(
+    (album) => {
+      const key =
+        `${normaliseArtistName(album.name)}::` +
+        `${album.album_type ?? ""}`;
 
-    if (seen.has(key)) {
-      return false;
-    }
+      if (seen.has(key)) {
+        return false;
+      }
 
-    seen.add(key);
+      seen.add(key);
 
-    return true;
-  });
+      return true;
+    },
+  );
 }
 
 function dedupeTrackCandidates<
@@ -430,21 +509,24 @@ function dedupeTrackCandidates<
     albumTrackNumber?: number;
   },
 >(tracks: T[]): T[] {
-  const seen = new Set<string>();
+  const seen =
+    new Set<string>();
 
-  return tracks.filter((track) => {
-    const key =
-      `${normaliseArtistName(track.name)}::` +
-      `${track.duration_ms ?? 0}`;
+  return tracks.filter(
+    (track) => {
+      const key =
+        `${normaliseArtistName(track.name)}::` +
+        `${track.duration_ms ?? 0}`;
 
-    if (seen.has(key)) {
-      return false;
-    }
+      if (seen.has(key)) {
+        return false;
+      }
 
-    seen.add(key);
+      seen.add(key);
 
-    return true;
-  });
+      return true;
+    },
+  );
 }
 
 async function getSpotifyArtistAlbums(
@@ -454,12 +536,15 @@ async function getSpotifyArtistAlbums(
     await spotifyGet<SpotifyArtistAlbumsResponse>(
       `/artists/${artistId}/albums`,
       {
-        include_groups: "album,single",
+        include_groups:
+          "album,single",
         limit: 20,
       },
     );
 
-  return dedupeAlbums(json.items ?? []);
+  return dedupeAlbums(
+    json.items ?? [],
+  );
 }
 
 async function getSpotifyAlbumTracks(
@@ -505,19 +590,26 @@ async function getBestMatchingSpotifyArtist(
   const ranked = [...artists]
     .map((artist) => ({
       artist,
-      score: scoreArtistMatch(
-        query,
-        artist,
-      ),
+      score:
+        scoreArtistMatch(
+          query,
+          artist,
+        ),
     }))
     .sort((a, b) => {
-      if (b.score !== a.score) {
-        return b.score - a.score;
+      if (
+        b.score !== a.score
+      ) {
+        return (
+          b.score - a.score
+        );
       }
 
       return (
-        (b.artist.popularity ?? 0) -
-        (a.artist.popularity ?? 0)
+        (b.artist
+          .popularity ?? 0) -
+        (a.artist
+          .popularity ?? 0)
       );
     });
 
@@ -537,9 +629,12 @@ async function getBestMatchingSpotifyArtist(
       "[spotify] rejected weak artist match",
       {
         query,
-        chosenName: best.artist.name,
-        chosenId: best.artist.id,
-        score: best.score,
+        chosenName:
+          best.artist.name,
+        chosenId:
+          best.artist.id,
+        score:
+          best.score,
       },
     );
 
@@ -558,9 +653,12 @@ export async function searchSpotifyArtist(
     return null;
   }
 
-  const cached = getCachedArtist(query);
+  const cached =
+    getCachedArtist(query);
 
-  if (cached !== undefined) {
+  if (
+    cached !== undefined
+  ) {
     return cached;
   }
 
@@ -570,13 +668,18 @@ export async function searchSpotifyArtist(
     );
 
   if (!best) {
-    setCachedArtist(query, null);
+    setCachedArtist(
+      query,
+      null,
+    );
 
     return null;
   }
 
   const result =
-    mapSpotifyArtistResult(best);
+    mapSpotifyArtistResult(
+      best,
+    );
 
   if (!result.imageUrl) {
     const appleArtist =
@@ -584,7 +687,9 @@ export async function searchSpotifyArtist(
         best.name,
       );
 
-    if (appleArtist?.imageUrl) {
+    if (
+      appleArtist?.imageUrl
+    ) {
       result.imageUrl =
         appleArtist.imageUrl;
 
@@ -592,7 +697,8 @@ export async function searchSpotifyArtist(
         "[spotify] using Apple Music artwork fallback",
         {
           query,
-          spotifyArtist: best.name,
+          spotifyArtist:
+            best.name,
           appleMusicArtist:
             appleArtist.name,
         },
@@ -600,7 +706,10 @@ export async function searchSpotifyArtist(
     }
   }
 
-  setCachedArtist(query, result);
+  setCachedArtist(
+    query,
+    result,
+  );
 
   return result;
 }
@@ -640,47 +749,71 @@ async function getDerivedTopTracksFromAlbums(
   return dedupedCandidates
     .sort((a, b) => {
       const aIsAlbum =
-        a.album.album_type === "album"
+        a.album.album_type ===
+        "album"
           ? 1
           : 0;
 
       const bIsAlbum =
-        b.album.album_type === "album"
+        b.album.album_type ===
+        "album"
           ? 1
           : 0;
 
-      if (bIsAlbum !== aIsAlbum) {
-        return bIsAlbum - aIsAlbum;
+      if (
+        bIsAlbum !==
+        aIsAlbum
+      ) {
+        return (
+          bIsAlbum -
+          aIsAlbum
+        );
       }
 
       const aDate =
-        a.album.release_date ?? "";
+        a.album.release_date ??
+        "";
 
       const bDate =
-        b.album.release_date ?? "";
+        b.album.release_date ??
+        "";
 
-      if (bDate !== aDate) {
-        return bDate.localeCompare(aDate);
+      if (
+        bDate !== aDate
+      ) {
+        return bDate.localeCompare(
+          aDate,
+        );
       }
 
       return (
-        (a.albumTrackNumber ?? 999) -
-        (b.albumTrackNumber ?? 999)
+        (a.albumTrackNumber ??
+          999) -
+        (b.albumTrackNumber ??
+          999)
       );
     })
     .slice(0, 5)
     .map((track) => ({
       id: track.id,
       name: track.name,
-      albumName: track.album.name,
-      imageUrl: getBestSpotifyImage(
-        track.album.images,
-      ),
+
+      albumName:
+        track.album.name,
+
+      imageUrl:
+        getBestSpotifyImage(
+          track.album.images,
+        ),
+
       spotifyUrl:
-        track.external_urls?.spotify ??
-        track.album.external_urls
+        track.external_urls
+          ?.spotify ??
+        track.album
+          .external_urls
           ?.spotify ??
         null,
+
       durationMs:
         typeof track.duration_ms ===
         "number"
@@ -721,6 +854,7 @@ async function getMusicBrainzReleasesForArtist(
         artist:
           spotifyArtistName ||
           fallbackName,
+
         message:
           error instanceof Error
             ? error.message
@@ -732,59 +866,132 @@ async function getMusicBrainzReleasesForArtist(
   }
 }
 
+function findMatchingSpotifyAlbum(
+  releaseTitle: string,
+  albums: SpotifyAlbum[],
+): SpotifyAlbum | null {
+  const expected =
+    normaliseArtistName(
+      releaseTitle,
+    );
+
+  if (!expected) {
+    return null;
+  }
+
+  const exact =
+    albums.find(
+      (album) =>
+        normaliseArtistName(
+          album.name,
+        ) === expected,
+    );
+
+  if (exact) {
+    return exact;
+  }
+
+  const relaxed =
+    albums.find(
+      (album) => {
+        const albumName =
+          normaliseArtistName(
+            album.name,
+          );
+
+        if (!albumName) {
+          return false;
+        }
+
+        return (
+          albumName.includes(
+            expected,
+          ) ||
+          expected.includes(
+            albumName,
+          )
+        );
+      },
+    );
+
+  return relaxed ?? null;
+}
+
 async function enrichReleaseArtwork(
   releases: SpotifyArtistPageRelease[],
   albums: SpotifyAlbum[],
   artistName: string,
 ): Promise<SpotifyArtistPageRelease[]> {
   return Promise.all(
-    releases.map(async (release) => {
-      const releaseName =
-        normaliseArtistName(
-          release.title,
-        );
+    releases.map(
+      async (release) => {
+        const spotifyAlbum =
+          findMatchingSpotifyAlbum(
+            release.title,
+            albums,
+          );
 
-      const spotifyAlbum =
-        albums.find(
-          (album) =>
-            normaliseArtistName(
-              album.name,
-            ) === releaseName,
-        );
+        const spotifyImage =
+          getBestSpotifyImage(
+            spotifyAlbum?.images,
+          );
 
-      const spotifyImage =
-        getBestSpotifyImage(
-          spotifyAlbum?.images,
-        );
+        if (spotifyImage) {
+          return {
+            ...release,
+            coverImageUrl:
+              spotifyImage,
+          };
+        }
 
-      if (spotifyImage) {
+        try {
+          const appleImage =
+            await searchAppleMusicReleaseImage(
+              artistName,
+              release.title,
+            );
+
+          if (appleImage) {
+            return {
+              ...release,
+              coverImageUrl:
+                appleImage,
+            };
+          }
+        } catch (error) {
+          console.warn(
+            "[spotify] Apple Music release artwork failed",
+            {
+              artist:
+                artistName,
+
+              release:
+                release.title,
+
+              message:
+                error instanceof Error
+                  ? error.message
+                  : String(error),
+            },
+          );
+        }
+
         return {
           ...release,
-          coverImageUrl: spotifyImage,
+          coverImageUrl:
+            release.coverImageUrl ??
+            null,
         };
-      }
-
-      const appleImage =
-        await searchAppleMusicReleaseImage(
-          artistName,
-          release.title,
-        );
-
-      return {
-        ...release,
-        coverImageUrl:
-          appleImage ??
-          release.coverImageUrl ??
-          null,
-      };
-    }),
+      },
+    ),
   );
 }
 
 export async function getSpotifyArtistPage(
   name: string,
 ): Promise<SpotifyArtistPageResult> {
-  const query = name.trim();
+  const query =
+    name.trim();
 
   if (!query) {
     return {
@@ -795,9 +1002,13 @@ export async function getSpotifyArtistPage(
   }
 
   const cached =
-    getCachedArtistPage(query);
+    getCachedArtistPage(
+      query,
+    );
 
-  if (cached !== undefined) {
+  if (
+    cached !== undefined
+  ) {
     return cached;
   }
 
@@ -807,20 +1018,25 @@ export async function getSpotifyArtistPage(
     );
 
   if (!best) {
-    const emptyResult: SpotifyArtistPageResult =
-      {
-        artist: null,
-        topTracks: [],
-        releases: [],
-      };
+    const emptyResult:
+      SpotifyArtistPageResult = {
+      artist: null,
+      topTracks: [],
+      releases: [],
+    };
 
-    setCachedArtist(query, null);
+    setCachedArtist(
+      query,
+      null,
+    );
 
     return emptyResult;
   }
 
   const artist =
-    mapSpotifyArtistResult(best);
+    mapSpotifyArtistResult(
+      best,
+    );
 
   if (!artist.imageUrl) {
     const appleArtist =
@@ -828,7 +1044,9 @@ export async function getSpotifyArtistPage(
         best.name,
       );
 
-    if (appleArtist?.imageUrl) {
+    if (
+      appleArtist?.imageUrl
+    ) {
       artist.imageUrl =
         appleArtist.imageUrl;
 
@@ -836,7 +1054,8 @@ export async function getSpotifyArtistPage(
         "[spotify] using Apple Music artwork fallback",
         {
           query,
-          spotifyArtist: best.name,
+          spotifyArtist:
+            best.name,
           appleMusicArtist:
             appleArtist.name,
         },
@@ -844,10 +1063,15 @@ export async function getSpotifyArtistPage(
     }
   }
 
-  let albums: SpotifyAlbum[] = [];
-  let topTracks: SpotifyArtistPageTrack[] =
+  let albums:
+    SpotifyAlbum[] = [];
+
+  let topTracks:
+    SpotifyArtistPageTrack[] =
     [];
-  let releases: SpotifyArtistPageRelease[] =
+
+  let releases:
+    SpotifyArtistPageRelease[] =
     [];
 
   try {
@@ -860,7 +1084,9 @@ export async function getSpotifyArtistPage(
       "[spotify] failed to fetch albums",
       {
         query,
-        artistId: best.id,
+        artistId:
+          best.id,
+
         message:
           error instanceof Error
             ? error.message
@@ -881,7 +1107,9 @@ export async function getSpotifyArtistPage(
       "[spotify] failed to derive top tracks from albums",
       {
         query,
-        artistId: best.id,
+        artistId:
+          best.id,
+
         message:
           error instanceof Error
             ? error.message
@@ -896,22 +1124,48 @@ export async function getSpotifyArtistPage(
       query,
     );
 
-  releases =
-    await enrichReleaseArtwork(
-      releases,
-      albums,
-      best.name,
-    );
+  if (
+    releases.length > 0
+  ) {
+    try {
+      releases =
+        await enrichReleaseArtwork(
+          releases,
+          albums,
+          best.name,
+        );
+    } catch (error) {
+      console.warn(
+        "[spotify] release artwork enrichment failed",
+        {
+          artist:
+            best.name,
 
-  const result: SpotifyArtistPageResult =
-    {
-      artist,
-      topTracks,
-      releases,
-    };
+          message:
+            error instanceof Error
+              ? error.message
+              : String(error),
+        },
+      );
+    }
+  }
 
-  setCachedArtist(query, artist);
-  setCachedArtistPage(query, result);
+  const result:
+    SpotifyArtistPageResult = {
+    artist,
+    topTracks,
+    releases,
+  };
+
+  setCachedArtist(
+    query,
+    artist,
+  );
+
+  setCachedArtistPage(
+    query,
+    result,
+  );
 
   return result;
 }
