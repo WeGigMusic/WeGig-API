@@ -45,12 +45,13 @@ export async function getArtistImage(
   let spotifyId: string | null = null;
 
   try {
-    imageUrl =
-      await searchAppleMusicArtistImage(name);
+    const appleResult =
+  await searchAppleMusicArtistImage(name);
 
-    if (imageUrl) {
-      imageSource = "apple";
-    }
+if (appleResult?.imageUrl) {
+  imageUrl = appleResult.imageUrl;
+  imageSource = "apple";
+}
   } catch (error) {
     console.warn("[artist-image] Apple lookup failed", {
       artistName: name,
