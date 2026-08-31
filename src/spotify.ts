@@ -111,6 +111,7 @@ let cachedToken: string | null = null;
 let tokenExpiryMs = 0;
 
 const artistCache = new Map<string, CachedArtistEntry>();
+
 const artistPageCache = new Map<
   string,
   CachedArtistPageEntry
@@ -122,6 +123,8 @@ const ARTIST_CACHE_TTL_MS =
 const ARTIST_PAGE_CACHE_TTL_MS =
   6 * 60 * 60 * 1000;
 
+const MAX_APPLE_RELEASE_LOOKUPS = 6;
+
 function getArtistCacheKey(
   name: string,
 ): string {
@@ -131,7 +134,7 @@ function getArtistCacheKey(
 function getArtistPageCacheKey(
   name: string,
 ): string {
-  return `${normaliseArtistName(name)}:v8`;
+  return `${normaliseArtistName(name)}:v9`;
 }
 
 function getCachedArtist(
@@ -192,8 +195,6 @@ function setCachedArtistPage(
   name: string,
   value: SpotifyArtistPageResult,
 ) {
-  // Important:
-  // never cache an artist page if Releases failed.
   if (value.releases.length === 0) {
     return;
   }
@@ -606,10 +607,8 @@ async function getBestMatchingSpotifyArtist(
       }
 
       return (
-        (b.artist
-          .popularity ?? 0) -
-        (a.artist
-          .popularity ?? 0)
+        (b.artist.popularity ?? 0) -
+        (a.artist.popularity ?? 0)
       );
     });
 
@@ -922,69 +921,89 @@ async function enrichReleaseArtwork(
   albums: SpotifyAlbum[],
   artistName: string,
 ): Promise<SpotifyArtistPageRelease[]> {
-  return Promise.all(
-    releases.map(
-      async (release) => {
-        const spotifyAlbum =
-          findMatchingSpotifyAlbum(
+  const results:
+    SpotifyArtistPageRelease[] = [];
+
+  let appleLookups = 0;
+
+  for (const release of releases) {
+    const spotifyAlbum =
+      findMatchingSpotifyAlbum(
+        release.title,
+        albums,
+      );
+
+    const spotifyImage =
+      getBestSpotifyImage(
+        spotifyAlbum?.images,
+      );
+
+    if (spotifyImage) {
+      results.push({
+        ...release,
+        coverImageUrl:
+          spotifyImage,
+      });
+
+      continue;
+    }
+
+    if (release.coverImageUrl) {
+      results.push(release);
+      continue;
+    }
+
+    if (
+      appleLookups >=
+      MAX_APPLE_RELEASE_LOOKUPS
+    ) {
+      results.push({
+        ...release,
+        coverImageUrl: null,
+      });
+
+      continue;
+    }
+
+    appleLookups += 1;
+
+    try {
+      const appleImage =
+        await searchAppleMusicReleaseImage(
+          artistName,
+          release.title,
+        );
+
+      results.push({
+        ...release,
+        coverImageUrl:
+          appleImage ?? null,
+      });
+    } catch (error) {
+      console.warn(
+        "[spotify] Apple Music release artwork failed",
+        {
+          artist:
+            artistName,
+
+          release:
             release.title,
-            albums,
-          );
 
-        const spotifyImage =
-          getBestSpotifyImage(
-            spotifyAlbum?.images,
-          );
+          message:
+            error instanceof Error
+              ? error.message
+              : String(error),
+        },
+      );
 
-        if (spotifyImage) {
-          return {
-            ...release,
-            coverImageUrl:
-              spotifyImage,
-          };
-        }
+      results.push({
+        ...release,
+        coverImageUrl: null,
+      });
+    }
+  }
 
-        try {
-          const appleImage =
-            await searchAppleMusicReleaseImage(
-              artistName,
-              release.title,
-            );
-
-          if (appleImage) {
-            return {
-              ...release,
-              coverImageUrl:
-                appleImage,
-            };
-          }
-        } catch (error) {
-          console.warn(
-            "[spotify] Apple Music release artwork failed",
-            {
-              artist:
-                artistName,
-
-              release:
-                release.title,
-
-              message:
-                error instanceof Error
-                  ? error.message
-                  : String(error),
-            },
-          );
-        }
-
-        return {
-          ...release,
-          coverImageUrl:
-            release.coverImageUrl ??
-            null,
-        };
-      },
-    ),
-  );
+  return results;
 }
 
 export async function getSpotifyArtistPage(

@@ -1,11 +1,17 @@
 import { normaliseArtistName } from "./utils/normaliseArtistName";
 
+type MbArtistAlias = {
+  name?: string;
+  "sort-name"?: string;
+};
+
 type MbArtist = {
   id: string;
   name: string;
   country?: string;
   disambiguation?: string;
   score?: number;
+  aliases?: MbArtistAlias[];
 };
 
 type MbSearchResponse = {
@@ -34,15 +40,24 @@ export type ArtistRelease = {
 
 const MB_BASE = "https://musicbrainz.org/ws/2";
 const COVER_ART_BASE = "https://coverartarchive.org";
-const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 
-type CacheEntry<T> = { expiresAt: number; data: T };
-const cache = new Map<string, CacheEntry<unknown>>();
+const ONE_DAY_MS =
+  24 * 60 * 60 * 1000;
+
+type CacheEntry<T> = {
+  expiresAt: number;
+  data: T;
+};
+
+const cache =
+  new Map<string, CacheEntry<unknown>>();
 
 let lastRequestAt = 0;
 
 function sleep(ms: number) {
-  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+  return new Promise<void>((resolve) =>
+    setTimeout(resolve, ms),
+  );
 }
 
 async function throttleOneReqPerSec() {
@@ -57,12 +72,20 @@ async function throttleOneReqPerSec() {
 }
 
 function getUserAgent() {
-  return process.env.MB_USER_AGENT || "WeGig/1.0 (contact unknown)";
+  return (
+    process.env.MB_USER_AGENT ||
+    "WeGig/1.0 (contact unknown)"
+  );
 }
 
-function getCached<T>(key: string): T | null {
+function getCached<T>(
+  key: string,
+): T | null {
   const entry = cache.get(key);
-  if (!entry) return null;
+
+  if (!entry) {
+    return null;
+  }
 
   if (Date.now() > entry.expiresAt) {
     cache.delete(key);
@@ -72,56 +95,435 @@ function getCached<T>(key: string): T | null {
   return entry.data as T;
 }
 
-function setCached<T>(key: string, data: T) {
-  cache.set(key, { expiresAt: Date.now() + ONE_DAY_MS, data });
+function setCached<T>(
+  key: string,
+  data: T,
+) {
+  cache.set(key, {
+    expiresAt:
+      Date.now() + ONE_DAY_MS,
+    data,
+  });
 }
 
-function scoreArtistMatch(query: string, artist: MbArtist): number {
-  const q = normaliseArtistName(query);
-  const name = normaliseArtistName(artist.name);
+function normaliseForMatch(
+  value: string,
+) {
+  return normaliseArtistName(
+    value
+      .replace(/[’']/g, "")
+      .replace(/\bn\b/gi, "n"),
+  );
+}
+
+function stripLeadingThe(
+  value: string,
+) {
+  return value.replace(
+    /^the\s+/i,
+    "",
+  );
+}
+
+function namesMatch(
+  a: string,
+  b: string,
+) {
+  const left =
+    normaliseForMatch(a);
+
+  const right =
+    normaliseForMatch(b);
+
+  if (!left || !right) {
+    return false;
+  }
+
+  if (left === right) {
+    return true;
+  }
+
+  return (
+    stripLeadingThe(left) ===
+    stripLeadingThe(right)
+  );
+}
+
+function scoreArtistMatch(
+  query: string,
+  artist: MbArtist,
+): number {
+  const q =
+    normaliseForMatch(query);
+
+  const name =
+    normaliseForMatch(
+      artist.name,
+    );
 
   let score = 0;
 
-  if (name === q) score += 1000;
-  if (name.startsWith(q)) score += 100;
-  if (name.includes(q)) score += 25;
+  // Name similarity matters, but should not overpower
+  // MusicBrainz's own relevance ranking.
+  if (
+    namesMatch(
+      query,
+      artist.name,
+    )
+  ) {
+    score += 300;
+  } else if (
+    name.startsWith(q)
+  ) {
+    score += 100;
+  } else if (
+    name.includes(q)
+  ) {
+    score += 25;
+  }
 
-  if (artist.score) {
-    score += artist.score / 100;
+  const aliasMatch =
+    (artist.aliases ?? []).some(
+      (alias) => {
+        const aliasName =
+          alias.name ??
+          alias["sort-name"] ??
+          "";
+
+        return namesMatch(
+          query,
+          aliasName,
+        );
+      },
+    );
+
+  if (aliasMatch) {
+    score += 200;
+  }
+
+  // Give MusicBrainz relevance substantially more weight.
+  if (
+    typeof artist.score ===
+    "number"
+  ) {
+    score += artist.score * 5;
   }
 
   return score;
 }
 
-function parseMbDate(date?: string): number {
-  if (!date) return 0;
+function buildArtistQueries(
+  query: string,
+) {
+  const trimmed =
+    query.trim();
 
-  if (/^\d{4}$/.test(date)) {
-    return Date.parse(`${date}-01-01`);
+  const variants =
+    Array.from(
+      new Set([
+        trimmed,
+
+        trimmed.replace(
+          /\bn\b/gi,
+          "'n'",
+        ),
+
+        trimmed.replace(
+          /\bn\b/gi,
+          "’n’",
+        ),
+      ]),
+    ).filter(Boolean);
+
+  const queries: string[] = [];
+
+  for (const variant of variants) {
+    // Start broad. This is important because the canonical
+    // MusicBrainz artist may use different punctuation.
+    queries.push(variant);
+
+    queries.push(
+      `"${variant}"`,
+    );
+
+    queries.push(
+      `artist:"${variant}"`,
+    );
   }
 
-  if (/^\d{4}-\d{2}$/.test(date)) {
-    return Date.parse(`${date}-01`);
+  return Array.from(
+    new Set(queries),
+  );
+}
+
+async function fetchMbJson<T>(
+  url: string,
+): Promise<T> {
+  const maxAttempts = 2;
+
+  for (
+    let attempt = 1;
+    attempt <= maxAttempts;
+    attempt += 1
+  ) {
+    await throttleOneReqPerSec();
+
+    const controller =
+      new AbortController();
+
+    const timeout =
+      setTimeout(
+        () =>
+          controller.abort(),
+        8000,
+      );
+
+    try {
+      const res = await fetch(
+        url,
+        {
+          headers: {
+            "User-Agent":
+              getUserAgent(),
+            Accept:
+              "application/json",
+          },
+          signal:
+            controller.signal,
+        },
+      );
+
+      if (res.ok) {
+        return (
+          await res.json()
+        ) as T;
+      }
+
+      const text =
+        await res
+          .text()
+          .catch(() => "");
+
+      if (
+        (res.status === 503 ||
+          res.status === 429) &&
+        attempt < maxAttempts
+      ) {
+        await sleep(1200);
+        continue;
+      }
+
+      throw new Error(
+        `MusicBrainz ${res.status}: ${text}`,
+      );
+    } catch (error) {
+      if (
+        attempt >= maxAttempts
+      ) {
+        throw error;
+      }
+
+      await sleep(1200);
+    } finally {
+      clearTimeout(timeout);
+    }
   }
 
-  if (/^\d{4}-\d{2}-\d{2}$/.test(date)) {
-    return Date.parse(date);
+  throw new Error(
+    "MusicBrainz request failed",
+  );
+}
+
+export async function searchMbArtists(
+  params: {
+    q: string;
+    limit?: number;
+  },
+) {
+  const q =
+    params.q.trim();
+
+  const limit =
+    Math.min(
+      Math.max(
+        params.limit ?? 8,
+        1,
+      ),
+      25,
+    );
+
+  if (!q) {
+    return {
+      count: 0,
+      artists: [],
+    };
+  }
+
+  // v3 prevents older incorrectly ranked results
+  // from being returned from the in-memory cache.
+  const cacheKey =
+    `mb:artist:v3:${normaliseForMatch(
+      q,
+    )}:${limit}`;
+
+  const cached =
+    getCached<{
+      count: number;
+      artists: MbArtist[];
+    }>(cacheKey);
+
+  if (cached) {
+    return cached;
+  }
+
+  const queries =
+    buildArtistQueries(q);
+
+  const collected =
+    new Map<string, MbArtist>();
+
+  for (
+    const searchQuery of queries
+  ) {
+    const url =
+      `${MB_BASE}/artist?query=${encodeURIComponent(
+        searchQuery,
+      )}` +
+      `&limit=25&fmt=json`;
+
+    try {
+      const json =
+        await fetchMbJson<MbSearchResponse>(
+          url,
+        );
+
+      for (
+        const artist of
+        json.artists ?? []
+      ) {
+        const existing =
+          collected.get(
+            artist.id,
+          );
+
+        // Keep whichever occurrence has the better
+        // MusicBrainz relevance score.
+        if (
+          !existing ||
+          (artist.score ?? 0) >
+            (existing.score ?? 0)
+        ) {
+          collected.set(
+            artist.id,
+            artist,
+          );
+        }
+      }
+    } catch (error) {
+      console.warn(
+        "[musicbrainz] artist search attempt failed",
+        {
+          query:
+            searchQuery,
+          message:
+            error instanceof Error
+              ? error.message
+              : String(error),
+        },
+      );
+    }
+  }
+
+  const artists =
+    Array.from(
+      collected.values(),
+    )
+      .sort(
+        (a, b) =>
+          scoreArtistMatch(
+            q,
+            b,
+          ) -
+          scoreArtistMatch(
+            q,
+            a,
+          ),
+      )
+      .slice(0, limit);
+
+  const payload = {
+    count:
+      artists.length,
+    artists,
+  };
+
+  // Never cache an empty result because MusicBrainz
+  // may simply have been temporarily unavailable.
+  if (
+    artists.length > 0
+  ) {
+    setCached(
+      cacheKey,
+      payload,
+    );
+  }
+
+  return payload;
+}
+
+function parseMbDate(
+  date?: string,
+): number {
+  if (!date) {
+    return 0;
+  }
+
+  if (
+    /^\d{4}$/.test(date)
+  ) {
+    return Date.parse(
+      `${date}-01-01`,
+    );
+  }
+
+  if (
+    /^\d{4}-\d{2}$/.test(
+      date,
+    )
+  ) {
+    return Date.parse(
+      `${date}-01`,
+    );
+  }
+
+  if (
+    /^\d{4}-\d{2}-\d{2}$/.test(
+      date,
+    )
+  ) {
+    return Date.parse(
+      date,
+    );
   }
 
   return 0;
 }
 
-async function coverArtExists(releaseGroupId: string): Promise<boolean> {
+async function coverArtExists(
+  releaseGroupId: string,
+): Promise<boolean> {
   try {
-    const res = await fetch(
-      `${COVER_ART_BASE}/release-group/${releaseGroupId}/front-250`,
-      {
-        method: "HEAD",
-        headers: {
-          "User-Agent": getUserAgent(),
+    const res =
+      await fetch(
+        `${COVER_ART_BASE}/release-group/${releaseGroupId}/front-250`,
+        {
+          method: "HEAD",
+          headers: {
+            "User-Agent":
+              getUserAgent(),
+          },
         },
-      },
-    );
+      );
 
     return res.ok;
   } catch {
@@ -129,99 +531,100 @@ async function coverArtExists(releaseGroupId: string): Promise<boolean> {
   }
 }
 
-export async function searchMbArtists(params: { q: string; limit?: number }) {
-  const q = params.q.trim();
-  const limit = Math.min(Math.max(params.limit ?? 8, 1), 25);
+export async function getArtistReleases(
+  mbid: string,
+): Promise<
+  ArtistRelease[]
+> {
+  const artistMbid =
+    mbid.trim();
 
-  const cacheKey = `mb:artist:${normaliseArtistName(q)}:${limit}`;
-  const cached = getCached<{ count: number; artists: MbArtist[] }>(cacheKey);
-  if (cached) return cached;
+  const cacheKey =
+    `mb:artist-releases:${artistMbid}`;
 
-  await throttleOneReqPerSec();
+  const cached =
+    getCached<
+      ArtistRelease[]
+    >(cacheKey);
 
-  const url =
-    `${MB_BASE}/artist?query=${encodeURIComponent(`artist:"${q}"`)}` +
-    `&limit=${limit}&fmt=json`;
-
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": getUserAgent(),
-      Accept: "application/json",
-    },
-  });
-
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`MusicBrainz ${res.status}: ${text}`);
+  if (cached) {
+    return cached;
   }
 
-  const json = (await res.json()) as MbSearchResponse;
-
-  const artists = (json.artists ?? []).sort(
-    (a, b) => scoreArtistMatch(q, b) - scoreArtistMatch(q, a),
-  );
-
-  const payload = { count: artists.length, artists };
-
-  setCached(cacheKey, payload);
-
-  return payload;
-}
-
-export async function getArtistReleases(mbid: string): Promise<ArtistRelease[]> {
-  const artistMbid = mbid.trim();
-
-  const cacheKey = `mb:artist-releases:${artistMbid}`;
-  const cached = getCached<ArtistRelease[]>(cacheKey);
-  if (cached) return cached;
-
-  await throttleOneReqPerSec();
-
   const url =
-    `${MB_BASE}/release-group?artist=${encodeURIComponent(artistMbid)}` +
+    `${MB_BASE}/release-group?artist=${encodeURIComponent(
+      artistMbid,
+    )}` +
     `&type=album|ep|single&limit=100&fmt=json`;
 
-  const res = await fetch(url, {
-    headers: {
-      "User-Agent": getUserAgent(),
-      Accept: "application/json",
-    },
-  });
+  const json =
+    await fetchMbJson<MbReleaseGroupsResponse>(
+      url,
+    );
 
-  if (!res.ok) {
-    const text = await res.text().catch(() => "");
-    throw new Error(`MusicBrainz releases ${res.status}: ${text}`);
-  }
-
-  const json = (await res.json()) as MbReleaseGroupsResponse;
-
-  const sortedItems = (json["release-groups"] ?? [])
-    .filter((item) => item["first-release-date"])
-    .sort(
-      (a, b) =>
-        parseMbDate(b["first-release-date"]) -
-        parseMbDate(a["first-release-date"]),
+  const sortedItems =
+    (
+      json[
+        "release-groups"
+      ] ?? []
     )
-    .slice(0, 25);
+      .filter(
+        (item) =>
+          item[
+            "first-release-date"
+          ],
+      )
+      .sort(
+        (a, b) =>
+          parseMbDate(
+            b[
+              "first-release-date"
+            ],
+          ) -
+          parseMbDate(
+            a[
+              "first-release-date"
+            ],
+          ),
+      )
+      .slice(0, 25);
 
-  const releases = await Promise.all(
-    sortedItems.map(async (item) => {
-      const hasCover = await coverArtExists(item.id);
+  const releases =
+    await Promise.all(
+      sortedItems.map(
+        async (item) => {
+          const hasCover =
+            await coverArtExists(
+              item.id,
+            );
 
-      return {
-        id: item.id,
-        title: item.title,
-        type: item["primary-type"],
-        firstReleaseDate: item["first-release-date"],
-        coverImageUrl: hasCover
-          ? `${COVER_ART_BASE}/release-group/${item.id}/front-250`
-          : null,
-        musicBrainzUrl: `https://musicbrainz.org/release-group/${item.id}`,
-      };
-    }),
+          return {
+            id: item.id,
+            title:
+              item.title,
+            type:
+              item[
+                "primary-type"
+              ],
+            firstReleaseDate:
+              item[
+                "first-release-date"
+              ],
+            coverImageUrl:
+              hasCover
+                ? `${COVER_ART_BASE}/release-group/${item.id}/front-250`
+                : null,
+            musicBrainzUrl:
+              `https://musicbrainz.org/release-group/${item.id}`,
+          };
+        },
+      ),
+    );
+
+  setCached(
+    cacheKey,
+    releases,
   );
-
-  setCached(cacheKey, releases);
 
   return releases;
 }
