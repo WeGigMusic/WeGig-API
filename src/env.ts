@@ -52,6 +52,17 @@ export const env = {
   spotifyClientId: required("SPOTIFY_CLIENT_ID"),
   spotifyClientSecret: required("SPOTIFY_CLIENT_SECRET"),
 
+  // apple music
+  appleMusicTeamId: optional("APPLE_MUSIC_TEAM_ID"),
+  appleMusicKeyId: optional("APPLE_MUSIC_KEY_ID"),
+  appleMusicPrivateKeyPath: optional(
+    "APPLE_MUSIC_PRIVATE_KEY_PATH",
+  ),
+  appleMusicStorefront: optional(
+    "APPLE_MUSIC_STOREFRONT",
+    "gb",
+  ),
+
   // optional integrations
   setlistFmApiKey: optional("SETLISTFM_API_KEY"),
   lastFmApiKey: optional("LASTFM_API_KEY"),
