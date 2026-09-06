@@ -1,15 +1,31 @@
-import express, { Request, Response, NextFunction } from "express";
+import express, {
+  Request,
+  Response,
+  NextFunction,
+} from "express";
 import cors from "cors";
 import multer from "multer";
 import { randomUUID } from "crypto";
 import { unlink } from "fs/promises";
 import "dotenv/config";
 
-import { createSessionToken, searchCities } from "./googlePlaces";
+import {
+  createSessionToken,
+  searchCities,
+} from "./googlePlaces";
 import prisma from "./prisma";
-import { requireAuth, type AuthedRequest } from "./auth";
-import { searchMbArtists, getArtistReleases } from "./musicbrainz";
-import { searchSpotifyArtist, getSpotifyArtistPage } from "./spotify";
+import {
+  requireAuth,
+  type AuthedRequest,
+} from "./auth";
+import {
+  searchMbArtists,
+  getArtistReleases,
+} from "./musicbrainz";
+import {
+  searchSpotifyArtist,
+  getSpotifyArtistPage,
+} from "./spotify";
 import { getArtistImage } from "./artistImage";
 
 import {
@@ -19,7 +35,10 @@ import {
 } from "./setlist";
 
 import { getLastFmSimilarArtists } from "./lastfm";
-import { Gig, CreateGigInput } from "./types/Gig";
+import {
+  Gig,
+  CreateGigInput,
+} from "./types/Gig";
 import type { NormalizedEvent } from "./types/Event";
 import { dedupeEvents } from "./utils/dedupeEvents";
 import { searchSkiddleEventsNormalized } from "./skiddle";
@@ -38,30 +57,39 @@ const app = express();
 
 app.set("trust proxy", 1);
 
-const PORT = Number(process.env.PORT ?? 5050);
+const PORT = Number(
+  process.env.PORT ?? 5050,
+);
 
 const upload = multer({
   dest: "tmp/",
 });
 
-function norm(value: unknown): string {
+function norm(
+  value: unknown,
+): string {
   return String(value ?? "")
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase();
 }
 
-function parseLatLong(value: unknown): {
+function parseLatLong(
+  value: unknown,
+): {
   latitude?: number;
   longitude?: number;
 } {
-  if (typeof value !== "string") {
+  if (
+    typeof value !== "string"
+  ) {
     return {};
   }
 
-  const [lat, lng] = value
-    .split(",")
-    .map(Number);
+  const [lat, lng] =
+    value
+      .split(",")
+      .map(Number);
 
   if (
     !Number.isFinite(lat) ||
@@ -79,11 +107,14 @@ function parseLatLong(value: unknown): {
 function optionalNumber(
   value: unknown,
 ): number | undefined {
-  if (typeof value !== "string") {
+  if (
+    typeof value !== "string"
+  ) {
     return undefined;
   }
 
-  const next = Number(value);
+  const next =
+    Number(value);
 
   return Number.isFinite(next)
     ? next
@@ -99,13 +130,16 @@ function optionalNumber(
  */
 async function addArtistImages(
   events: NormalizedEvent[],
-): Promise<NormalizedEvent[]> {
+): Promise<
+  NormalizedEvent[]
+> {
   const artistNames = [
     ...new Set(
       events
         .flatMap(
           (event) =>
-            event.artists ?? [],
+            event.artists ??
+            [],
         )
         .map((artist) =>
           artist.name.trim(),
@@ -136,7 +170,7 @@ async function addArtistImages(
    */
   for (
     const artistName of
-      artistNames
+    artistNames
   ) {
     try {
       const result =
@@ -146,17 +180,22 @@ async function addArtistImages(
 
       imageEntries.push([
         norm(artistName),
-        result.imageUrl ?? null,
+        result.imageUrl ??
+          null,
       ]);
     } catch (error) {
       console.warn(
         "[events/search] Artist image lookup failed",
         {
           artistName,
+
           message:
-            error instanceof Error
+            error instanceof
+            Error
               ? error.message
-              : String(error),
+              : String(
+                  error,
+                ),
         },
       );
 
@@ -187,7 +226,8 @@ async function addArtistImages(
                 norm(
                   artist.name,
                 ),
-              ) ?? null,
+              ) ??
+              null,
           }),
         ),
     }),
@@ -197,9 +237,10 @@ async function addArtistImages(
 function setlistDateToYmdSafe(
   value: unknown,
 ): string | undefined {
-  const raw = String(
-    value ?? "",
-  ).trim();
+  const raw =
+    String(
+      value ?? "",
+    ).trim();
 
   if (
     /^\d{4}-\d{2}-\d{2}$/.test(
@@ -241,14 +282,16 @@ function mapSetlistToNormalizedEvent(
     fallbackArtist;
 
   return {
-    source: "setlistfm",
+    source:
+      "setlistfm",
 
     sourceEventId:
       String(
         item?.id ?? "",
       ),
 
-    title: artistName,
+    title:
+      artistName,
 
     date:
       setlistDateToYmdSafe(
@@ -264,7 +307,8 @@ function mapSetlistToNormalizedEvent(
 
     city:
       item?.cityName ??
-      item?.venue?.city?.name,
+      item?.venue?.city
+        ?.name,
 
     countryCode:
       item?.countryCode ??
@@ -276,7 +320,8 @@ function mapSetlistToNormalizedEvent(
 
     artists: [
       {
-        name: artistName,
+        name:
+          artistName,
       },
     ],
   };
@@ -338,8 +383,10 @@ app.get(
   ) => {
     res.json({
       status: "ok",
+
       message:
         "WeGig API is running",
+
       timestamp:
         new Date().toISOString(),
     });
@@ -348,7 +395,10 @@ app.get(
 
 app.get(
   "/version",
-  (_req, res) => {
+  (
+    _req,
+    res,
+  ) => {
     res.json({
       version:
         "wegig-api-2026-08-31-artist-cache",
@@ -356,6 +406,16 @@ app.get(
   },
 );
 
+/**
+ * City autocomplete
+ *
+ * If the app supplies latitude + longitude,
+ * Google Places will bias results toward the
+ * user's location without restricting worldwide search.
+ *
+ * If no location is supplied, searchCities()
+ * performs normal worldwide autocomplete.
+ */
 app.get(
   "/places/cities/search",
   async (
@@ -365,7 +425,8 @@ app.get(
     try {
       const query =
         String(
-          req.query.q ?? "",
+          req.query.q ??
+            "",
         ).trim();
 
       if (
@@ -376,10 +437,52 @@ app.get(
         });
       }
 
+      const latitude =
+        typeof req.query
+          .latitude ===
+        "string"
+          ? Number(
+              req.query
+                .latitude,
+            )
+          : undefined;
+
+      const longitude =
+        typeof req.query
+          .longitude ===
+        "string"
+          ? Number(
+              req.query
+                .longitude,
+            )
+          : undefined;
+
+      const hasValidLocation =
+        typeof latitude ===
+          "number" &&
+        typeof longitude ===
+          "number" &&
+        Number.isFinite(
+          latitude,
+        ) &&
+        Number.isFinite(
+          longitude,
+        ) &&
+        latitude >= -90 &&
+        latitude <= 90 &&
+        longitude >= -180 &&
+        longitude <= 180;
+
       const cities =
         await searchCities(
           query,
           createSessionToken(),
+          hasValidLocation
+            ? {
+                latitude,
+                longitude,
+              }
+            : undefined,
         );
 
       return res.json({
@@ -400,7 +503,9 @@ app.get(
             }),
           ),
       });
-    } catch (e: any) {
+    } catch (
+      e: any
+    ) {
       console.error(
         "[places/cities/search] failed",
         e,
@@ -444,7 +549,8 @@ app.get(
 
             orderBy: [
               {
-                date: "desc",
+                date:
+                  "desc",
               },
               {
                 createdAt:
@@ -458,6 +564,7 @@ app.get(
         dbGigs.map(
           (g) => ({
             id: g.id,
+
             artist:
               g.artist,
 
@@ -513,10 +620,14 @@ app.get(
         );
 
       return res.json({
-        count: gigs.length,
+        count:
+          gigs.length,
+
         gigs,
       });
-    } catch (error) {
+    } catch (
+      error
+    ) {
       console.error(
         "Error fetching gigs from Prisma:",
         error,
@@ -546,31 +657,36 @@ app.post(
       "[gigs] creating gig",
       {
         userId,
+
         artist:
           req.body?.artist,
+
         venue:
           req.body?.venue,
+
         city:
           req.body?.city,
+
         date:
           req.body?.date,
       },
     );
 
     const gigInput =
-      req.body as CreateGigInput & {
-        externalSource?: unknown;
-        externalId?: unknown;
-        artistMbid?: unknown;
-        ticketUrl?: unknown;
-        venueLatitude?: unknown;
-        venueLongitude?: unknown;
-        venuePlaceName?: unknown;
-        venuePlaceId?: unknown;
-      };
+      req.body as
+        CreateGigInput & {
+          externalSource?: unknown;
+          externalId?: unknown;
+          artistMbid?: unknown;
+          ticketUrl?: unknown;
+          venueLatitude?: unknown;
+          venueLongitude?: unknown;
+          venuePlaceName?: unknown;
+          venuePlaceId?: unknown;
+        };
 
-    const errors: string[] =
-      [];
+    const errors:
+      string[] = [];
 
     if (
       typeof gigInput.artist !==
@@ -713,7 +829,9 @@ app.post(
         ? gigInput.artistMbid.trim()
         : undefined;
 
-    if (artistMbid) {
+    if (
+      artistMbid
+    ) {
       const uuidRegex =
         /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -745,10 +863,14 @@ app.post(
         : undefined;
 
     if (
-      (externalSource &&
-        !externalId) ||
-      (!externalSource &&
-        externalId)
+      (
+        externalSource &&
+        !externalId
+      ) ||
+      (
+        !externalSource &&
+        externalId
+      )
     ) {
       errors.push(
         "externalSource and externalId must be provided together",
@@ -798,14 +920,18 @@ app.post(
         : undefined;
 
     if (
-      (venueLatitude !==
-        undefined &&
+      (
+        venueLatitude !==
+          undefined &&
         venueLongitude ===
-          undefined) ||
-      (venueLatitude ===
-        undefined &&
+          undefined
+      ) ||
+      (
+        venueLatitude ===
+          undefined &&
         venueLongitude !==
-          undefined)
+          undefined
+      )
     ) {
       errors.push(
         "venueLatitude and venueLongitude must be provided together",
@@ -815,8 +941,12 @@ app.post(
     if (
       venueLatitude !==
         undefined &&
-      (venueLatitude < -90 ||
-        venueLatitude > 90)
+      (
+        venueLatitude <
+          -90 ||
+        venueLatitude >
+          90
+      )
     ) {
       errors.push(
         "venueLatitude must be between -90 and 90",
@@ -826,8 +956,12 @@ app.post(
     if (
       venueLongitude !==
         undefined &&
-      (venueLongitude < -180 ||
-        venueLongitude > 180)
+      (
+        venueLongitude <
+          -180 ||
+        venueLongitude >
+          180
+      )
     ) {
       errors.push(
         "venueLongitude must be between -180 and 180",
@@ -835,14 +969,17 @@ app.post(
     }
 
     if (
-      errors.length > 0
+      errors.length >
+      0
     ) {
       return res
         .status(400)
         .json({
           error:
             "Validation failed",
-          details: errors,
+
+          details:
+            errors,
         });
     }
 
@@ -862,7 +999,9 @@ app.post(
             },
           );
 
-        if (already) {
+        if (
+          already
+        ) {
           return res
             .status(409)
             .json({
@@ -895,7 +1034,9 @@ app.post(
           gigInput.city,
         );
 
-      if (venuePlaceId) {
+      if (
+        venuePlaceId
+      ) {
         const existingForArtistDate =
           await prisma.gig.findMany(
             {
@@ -981,7 +1122,9 @@ app.post(
               normalizedDate,
         );
 
-      if (alreadyByText) {
+      if (
+        alreadyByText
+      ) {
         return res
           .status(409)
           .json({
@@ -1060,66 +1203,72 @@ app.post(
           },
         );
 
-      const newGig: Gig = {
-        id: created.id,
+      const newGig: Gig =
+        {
+          id:
+            created.id,
 
-        artist:
-          created.artist,
+          artist:
+            created.artist,
 
-        venue:
-          created.venue,
+          venue:
+            created.venue,
 
-        city:
-          created.city,
+          city:
+            created.city,
 
-        date:
-          created.date,
+          date:
+            created.date,
 
-        rating:
-          created.rating ??
-          undefined,
+          rating:
+            created.rating ??
+            undefined,
 
-        notes:
-          created.notes ??
-          undefined,
+          notes:
+            created.notes ??
+            undefined,
 
-        artistMbid:
-          created.artistMbid ??
-          undefined,
+          artistMbid:
+            created.artistMbid ??
+            undefined,
 
-        externalSource:
-          created.externalSource ??
-          undefined,
+          externalSource:
+            created.externalSource ??
+            undefined,
 
-        externalId:
-          created.externalId ??
-          undefined,
+          externalId:
+            created.externalId ??
+            undefined,
 
-        ticketUrl:
-          created.ticketUrl ??
-          undefined,
+          ticketUrl:
+            created.ticketUrl ??
+            undefined,
 
-        venueLatitude:
-          created.venueLatitude ??
-          undefined,
+          venueLatitude:
+            created.venueLatitude ??
+            undefined,
 
-        venueLongitude:
-          created.venueLongitude ??
-          undefined,
+          venueLongitude:
+            created.venueLongitude ??
+            undefined,
 
-        venuePlaceName:
-          created.venuePlaceName ??
-          undefined,
+          venuePlaceName:
+            created.venuePlaceName ??
+            undefined,
 
-        venuePlaceId:
-          created.venuePlaceId ??
-          undefined,
-      };
+          venuePlaceId:
+            created.venuePlaceId ??
+            undefined,
+        };
 
       return res
         .status(201)
-        .json(newGig);
-    } catch (error) {
+        .json(
+          newGig,
+        );
+    } catch (
+      error
+    ) {
       console.error(
         "Error saving gig to Prisma:",
         error,
@@ -1159,7 +1308,9 @@ app.patch(
           },
         );
 
-      if (!existing) {
+      if (
+        !existing
+      ) {
         return res
           .status(404)
           .json({
@@ -1168,104 +1319,113 @@ app.patch(
           });
       }
 
-      const next: Gig = {
-        id:
-          existing.id,
+      const next: Gig =
+        {
+          id:
+            existing.id,
 
-        artist:
-          typeof req.body.artist ===
-          "string"
-            ? req.body.artist.trim()
-            : existing.artist,
+          artist:
+            typeof req.body.artist ===
+            "string"
+              ? req.body.artist.trim()
+              : existing.artist,
 
-        venue:
-          typeof req.body.venue ===
-          "string"
-            ? req.body.venue.trim()
-            : existing.venue,
+          venue:
+            typeof req.body.venue ===
+            "string"
+              ? req.body.venue.trim()
+              : existing.venue,
 
-        city:
-          typeof req.body.city ===
-          "string"
-            ? req.body.city.trim()
-            : existing.city,
+          city:
+            typeof req.body.city ===
+            "string"
+              ? req.body.city.trim()
+              : existing.city,
 
-        date:
-          typeof req.body.date ===
-          "string"
-            ? req.body.date.trim()
-            : existing.date,
+          date:
+            typeof req.body.date ===
+            "string"
+              ? req.body.date.trim()
+              : existing.date,
 
-        rating:
-          req.body.rating !==
-          undefined
-            ? req.body.rating
-            : existing.rating ??
-              undefined,
+          rating:
+            req.body.rating !==
+            undefined
+              ? req.body.rating
+              : existing.rating ??
+                undefined,
 
-        notes:
-          typeof req.body.notes ===
-          "string"
-            ? req.body.notes.trim()
-            : existing.notes ??
-              undefined,
+          notes:
+            typeof req.body.notes ===
+            "string"
+              ? req.body.notes.trim()
+              : existing.notes ??
+                undefined,
 
-        externalSource:
-          existing.externalSource ??
-          undefined,
+          externalSource:
+            existing.externalSource ??
+            undefined,
 
-        externalId:
-          existing.externalId ??
-          undefined,
+          externalId:
+            existing.externalId ??
+            undefined,
 
-        artistMbid:
-          existing.artistMbid ??
-          undefined,
+          artistMbid:
+            existing.artistMbid ??
+            undefined,
 
-        ticketUrl:
-          typeof req.body.ticketUrl ===
-          "string"
-            ? req.body.ticketUrl.trim()
-            : existing.ticketUrl ??
-              undefined,
+          ticketUrl:
+            typeof req.body.ticketUrl ===
+            "string"
+              ? req.body.ticketUrl.trim()
+              : existing.ticketUrl ??
+                undefined,
 
-        venueLatitude:
-          typeof req.body.venueLatitude ===
-          "number"
-            ? req.body
-                .venueLatitude
-            : existing
-                .venueLatitude ??
-              undefined,
+          venueLatitude:
+            typeof req.body
+              .venueLatitude ===
+            "number"
+              ? req.body
+                  .venueLatitude
+              : existing
+                  .venueLatitude ??
+                undefined,
 
-        venueLongitude:
-          typeof req.body.venueLongitude ===
-          "number"
-            ? req.body
-                .venueLongitude
-            : existing
-                .venueLongitude ??
-              undefined,
+          venueLongitude:
+            typeof req.body
+              .venueLongitude ===
+            "number"
+              ? req.body
+                  .venueLongitude
+              : existing
+                  .venueLongitude ??
+                undefined,
 
-        venuePlaceName:
-          typeof req.body.venuePlaceName ===
-          "string"
-            ? req.body.venuePlaceName.trim()
-            : existing
-                .venuePlaceName ??
-              undefined,
+          venuePlaceName:
+            typeof req.body
+              .venuePlaceName ===
+            "string"
+              ? req.body
+                  .venuePlaceName
+                  .trim()
+              : existing
+                  .venuePlaceName ??
+                undefined,
 
-        venuePlaceId:
-          typeof req.body.venuePlaceId ===
-          "string"
-            ? req.body.venuePlaceId.trim()
-            : existing
-                .venuePlaceId ??
-              undefined,
-      };
+          venuePlaceId:
+            typeof req.body
+              .venuePlaceId ===
+            "string"
+              ? req.body
+                  .venuePlaceId
+                  .trim()
+              : existing
+                  .venuePlaceId ??
+                undefined,
+        };
 
-      const errors: string[] =
-        [];
+      const errors:
+        string[] = [];
 
       if (
         !next.artist?.trim()
@@ -1319,8 +1479,10 @@ app.patch(
           !Number.isFinite(
             next.rating,
           ) ||
-          next.rating < 1 ||
-          next.rating > 5
+          next.rating <
+            1 ||
+          next.rating >
+            5
         ) {
           errors.push(
             "rating must be a number between 1 and 5",
@@ -1329,14 +1491,18 @@ app.patch(
       }
 
       if (
-        (next.venueLatitude !==
-          undefined &&
+        (
+          next.venueLatitude !==
+            undefined &&
           next.venueLongitude ===
-            undefined) ||
-        (next.venueLatitude ===
-          undefined &&
+            undefined
+        ) ||
+        (
+          next.venueLatitude ===
+            undefined &&
           next.venueLongitude !==
-            undefined)
+            undefined
+        )
       ) {
         errors.push(
           "venueLatitude and venueLongitude must be provided together",
@@ -1346,10 +1512,12 @@ app.patch(
       if (
         next.venueLatitude !==
           undefined &&
-        (next.venueLatitude <
-          -90 ||
+        (
+          next.venueLatitude <
+            -90 ||
           next.venueLatitude >
-            90)
+            90
+        )
       ) {
         errors.push(
           "venueLatitude must be between -90 and 90",
@@ -1359,10 +1527,12 @@ app.patch(
       if (
         next.venueLongitude !==
           undefined &&
-        (next.venueLongitude <
-          -180 ||
+        (
+          next.venueLongitude <
+            -180 ||
           next.venueLongitude >
-            180)
+            180
+        )
       ) {
         errors.push(
           "venueLongitude must be between -180 and 180",
@@ -1370,13 +1540,15 @@ app.patch(
       }
 
       if (
-        errors.length > 0
+        errors.length >
+        0
       ) {
         return res
           .status(400)
           .json({
             error:
               "Validation failed",
+
             details:
               errors,
           });
@@ -1387,6 +1559,7 @@ app.patch(
           {
             where: {
               userId,
+
               NOT: {
                 id,
               },
@@ -1487,7 +1660,9 @@ app.patch(
           },
         );
 
-      if (duplicate) {
+      if (
+        duplicate
+      ) {
         return res
           .status(409)
           .json({
@@ -1551,68 +1726,70 @@ app.patch(
           },
         );
 
-      const responseGig: Gig =
-        {
-          id:
-            updated.id,
+      const responseGig:
+        Gig = {
+        id:
+          updated.id,
 
-          artist:
-            updated.artist,
+        artist:
+          updated.artist,
 
-          venue:
-            updated.venue,
+        venue:
+          updated.venue,
 
-          city:
-            updated.city,
+        city:
+          updated.city,
 
-          date:
-            updated.date,
+        date:
+          updated.date,
 
-          rating:
-            updated.rating ??
-            undefined,
+        rating:
+          updated.rating ??
+          undefined,
 
-          notes:
-            updated.notes ??
-            undefined,
+        notes:
+          updated.notes ??
+          undefined,
 
-          artistMbid:
-            updated.artistMbid ??
-            undefined,
+        artistMbid:
+          updated.artistMbid ??
+          undefined,
 
-          externalSource:
-            updated.externalSource ??
-            undefined,
+        externalSource:
+          updated.externalSource ??
+          undefined,
 
-          externalId:
-            updated.externalId ??
-            undefined,
+        externalId:
+          updated.externalId ??
+          undefined,
 
-          ticketUrl:
-            updated.ticketUrl ??
-            undefined,
+        ticketUrl:
+          updated.ticketUrl ??
+          undefined,
 
-          venueLatitude:
-            updated.venueLatitude ??
-            undefined,
+        venueLatitude:
+          updated.venueLatitude ??
+          undefined,
 
-          venueLongitude:
-            updated.venueLongitude ??
-            undefined,
+        venueLongitude:
+          updated.venueLongitude ??
+          undefined,
 
-          venuePlaceName:
-            updated.venuePlaceName ??
-            undefined,
+        venuePlaceName:
+          updated.venuePlaceName ??
+          undefined,
 
-          venuePlaceId:
-            updated.venuePlaceId ??
-            undefined,
-        };
+        venuePlaceId:
+          updated.venuePlaceId ??
+          undefined,
+      };
 
       return res.json(
         responseGig,
       );
-    } catch (error) {
+    } catch (
+      error
+    ) {
       console.error(
         "Error updating gig in Prisma:",
         error,
@@ -1652,7 +1829,9 @@ app.delete(
           },
         );
 
-      if (!existing) {
+      if (
+        !existing
+      ) {
         return res
           .status(404)
           .json({
@@ -1676,7 +1855,9 @@ app.delete(
           deletedId:
             id,
         });
-    } catch (error) {
+    } catch (
+      error
+    ) {
       console.error(
         "Error deleting gig in Prisma:",
         error,
@@ -1704,7 +1885,9 @@ app.post(
     const file =
       req.file;
 
-    if (!file) {
+    if (
+      !file
+    ) {
       return res
         .status(400)
         .json({
@@ -1747,7 +1930,9 @@ app.post(
             undefined,
         },
       });
-    } catch (error: any) {
+    } catch (
+      error: any
+    ) {
       console.error(
         "OCR route failed:",
         error,
@@ -1763,7 +1948,9 @@ app.post(
     } finally {
       await unlink(
         file.path,
-      ).catch(() => {});
+      ).catch(
+        () => {},
+      );
     }
   },
 );
@@ -1806,7 +1993,9 @@ app.get(
             ? keyword.trim()
             : "";
 
-      if (!kw) {
+      if (
+        !kw
+      ) {
         return res
           .status(400)
           .json({
@@ -1999,7 +2188,8 @@ app.get(
             skiddle:
               skiddleEvents.length,
 
-            setlistfm: 0,
+            setlistfm:
+              0,
           },
 
           events:
@@ -2029,13 +2219,16 @@ app.get(
                 ? venue
                 : undefined,
 
-            page: 1,
+            page:
+              1,
           },
         );
 
       const setlistEvents =
         setlistResult.setlists.map(
-          (item: any) =>
+          (
+            item: any,
+          ) =>
             mapSetlistToNormalizedEvent(
               item,
               kw,
@@ -2063,8 +2256,11 @@ app.get(
           searchMode,
 
         sources: {
-          ticketmaster: 0,
-          skiddle: 0,
+          ticketmaster:
+            0,
+
+          skiddle:
+            0,
 
           setlistfm:
             setlistEvents.length,
@@ -2072,7 +2268,9 @@ app.get(
 
         events,
       });
-    } catch (e: any) {
+    } catch (
+      e: any
+    ) {
       console.error(
         "[events/search] failed",
         e,
@@ -2181,7 +2379,9 @@ app.get(
       return res.json(
         data,
       );
-    } catch (e: any) {
+    } catch (
+      e: any
+    ) {
       return res
         .status(502)
         .json({
@@ -2252,6 +2452,7 @@ app.get(
             radiusNumber,
 
           unit,
+
           size,
         },
       );
@@ -2385,7 +2586,9 @@ app.get(
       return res.json({
         events,
       });
-    } catch (e: any) {
+    } catch (
+      e: any
+    ) {
       console.error(
         "[discover/events] failed",
         e,
@@ -2417,7 +2620,9 @@ app.get(
       return res.json(
         data,
       );
-    } catch (e: any) {
+    } catch (
+      e: any
+    ) {
       return res
         .status(502)
         .json({
@@ -2455,7 +2660,8 @@ app.get(
       const data =
         await searchTmVenuesUk(
           {
-            q: query,
+            q:
+              query,
 
             city:
               typeof city ===
@@ -2476,7 +2682,9 @@ app.get(
       return res.json(
         data,
       );
-    } catch (e: any) {
+    } catch (
+      e: any
+    ) {
       return res
         .status(502)
         .json({
@@ -2490,11 +2698,15 @@ app.get(
 
 app.get(
   "/mb/artists/search",
-  async (req, res) => {
+  async (
+    req,
+    res,
+  ) => {
     try {
       const q =
         String(
-          req.query.q ?? "",
+          req.query.q ??
+            "",
         ).trim();
 
       const limit =
@@ -2505,7 +2717,9 @@ app.get(
             )
           : undefined;
 
-      if (!q) {
+      if (
+        !q
+      ) {
         return res
           .status(400)
           .json({
@@ -2525,7 +2739,9 @@ app.get(
       return res.json(
         result,
       );
-    } catch (err: any) {
+    } catch (
+      err: any
+    ) {
       console.error(
         "MusicBrainz search error:",
         err,
@@ -2539,7 +2755,9 @@ app.get(
 
           detail:
             err?.message ??
-            String(err),
+            String(
+              err,
+            ),
         });
     }
   },
@@ -2558,7 +2776,9 @@ app.get(
             "",
         ).trim();
 
-      if (!mbid) {
+      if (
+        !mbid
+      ) {
         return res
           .status(400)
           .json({
@@ -2575,7 +2795,9 @@ app.get(
       return res.json({
         releases,
       });
-    } catch (err: any) {
+    } catch (
+      err: any
+    ) {
       console.error(
         "MusicBrainz releases error:",
         err,
@@ -2589,7 +2811,9 @@ app.get(
 
           detail:
             err?.message ??
-            String(err),
+            String(
+              err,
+            ),
         });
     }
   },
@@ -2620,7 +2844,9 @@ app.get(
             "",
         ).trim();
 
-      if (!name) {
+      if (
+        !name
+      ) {
         return res
           .status(400)
           .json({
@@ -2637,7 +2863,9 @@ app.get(
       return res.json(
         result,
       );
-    } catch (error) {
+    } catch (
+      error
+    ) {
       console.error(
         "[artists/image] failed",
         error,
@@ -2666,7 +2894,9 @@ app.get(
             "",
         ).trim();
 
-      if (!name) {
+      if (
+        !name
+      ) {
         return res
           .status(400)
           .json({
@@ -2683,7 +2913,9 @@ app.get(
       return res.json({
         artist,
       });
-    } catch (e: any) {
+    } catch (
+      e: any
+    ) {
       return res
         .status(502)
         .json({
@@ -2708,7 +2940,9 @@ app.get(
             "",
         ).trim();
 
-      if (!name) {
+      if (
+        !name
+      ) {
         return res
           .status(400)
           .json({
@@ -2725,7 +2959,9 @@ app.get(
       return res.json(
         result,
       );
-    } catch (e: any) {
+    } catch (
+      e: any
+    ) {
       return res
         .status(502)
         .json({
@@ -2754,7 +2990,9 @@ app.get(
         typeof req.query
           .artistMbid ===
         "string"
-          ? req.query.artistMbid.trim()
+          ? req.query
+              .artistMbid
+              .trim()
           : undefined;
 
       const city =
@@ -2788,7 +3026,9 @@ app.get(
             )
           : 1;
 
-      if (!artist) {
+      if (
+        !artist
+      ) {
         return res
           .status(400)
           .json({
@@ -2817,7 +3057,8 @@ app.get(
       return res
         .status(200)
         .json({
-          success: true,
+          success:
+            true,
 
           setlists:
             result.setlists,
@@ -3017,7 +3258,9 @@ app.get(
             "",
         ).trim();
 
-      if (!artist) {
+      if (
+        !artist
+      ) {
         return res
           .status(400)
           .json({
@@ -3034,7 +3277,9 @@ app.get(
       return res.json({
         artists,
       });
-    } catch (e: any) {
+    } catch (
+      e: any
+    ) {
       return res
         .status(502)
         .json({

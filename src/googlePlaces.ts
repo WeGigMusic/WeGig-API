@@ -25,15 +25,45 @@ export type PlaceDetails = {
   longitude?: number;
 };
 
+export type PlacesLocationBias = {
+  latitude?: number;
+  longitude?: number;
+};
+
 export const createSessionToken = (): string => {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 };
 
+function buildLocationBias(location?: PlacesLocationBias) {
+  if (
+    location?.latitude == null ||
+    location?.longitude == null ||
+    !Number.isFinite(location.latitude) ||
+    !Number.isFinite(location.longitude)
+  ) {
+    return undefined;
+  }
+
+  return {
+    circle: {
+      center: {
+        latitude: location.latitude,
+        longitude: location.longitude,
+      },
+      radius: 50000,
+    },
+  };
+}
+
 export const searchVenues = async (
   input: string,
   sessionToken: string,
+  location?: PlacesLocationBias,
 ): Promise<PlaceSuggestion[]> => {
   if (!input.trim()) return [];
+
+  const locationBias =
+    buildLocationBias(location);
 
   const response = await fetch(
     "https://places.googleapis.com/v1/places:autocomplete",
@@ -52,33 +82,51 @@ export const searchVenues = async (
           "performing_arts_theater",
           "event_venue",
         ],
+        ...(locationBias
+          ? { locationBias }
+          : {}),
         languageCode: "en",
       }),
     },
   );
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Autocomplete failed: ${response.status} ${errorText}`);
+    const errorText =
+      await response.text();
+
+    throw new Error(
+      `Autocomplete failed: ${response.status} ${errorText}`,
+    );
   }
 
-  const data = await response.json();
+  const data =
+    await response.json();
 
   return (data.suggestions ?? [])
-    .map((item: any) => item.placePrediction)
+    .map(
+      (item: any) =>
+        item.placePrediction,
+    )
     .filter(Boolean)
     .map((place: any) => ({
       placeId: place.placeId,
-      title: place.text?.text ?? "",
-      subtitle: place.structuredFormat?.secondaryText?.text,
+      title:
+        place.text?.text ?? "",
+      subtitle:
+        place.structuredFormat
+          ?.secondaryText?.text,
     }));
 };
 
 export const searchCities = async (
   input: string,
   sessionToken: string,
+  location?: PlacesLocationBias,
 ): Promise<CitySuggestion[]> => {
   if (!input.trim()) return [];
+
+  const locationBias =
+    buildLocationBias(location);
 
   const response = await fetch(
     "https://places.googleapis.com/v1/places:autocomplete",
@@ -91,31 +139,54 @@ export const searchCities = async (
       body: JSON.stringify({
         input,
         sessionToken,
-        includedPrimaryTypes: ["locality", "postal_town"],
-        includedRegionCodes: ["gb"],
+        includedPrimaryTypes: [
+          "locality",
+          "postal_town",
+        ],
+        ...(locationBias
+          ? { locationBias }
+          : {}),
         languageCode: "en",
       }),
     },
   );
 
   if (!response.ok) {
-    const errorText = await response.text();
+    const errorText =
+      await response.text();
+
     throw new Error(
       `City autocomplete failed: ${response.status} ${errorText}`,
     );
   }
 
-  const data = await response.json();
+  const data =
+    await response.json();
 
   return (data.suggestions ?? [])
-    .map((item: any) => item.placePrediction)
+    .map(
+      (item: any) =>
+        item.placePrediction,
+    )
     .filter(Boolean)
     .map((place: any) => ({
-      placeId: place.placeId,
-      name: place.structuredFormat?.mainText?.text ?? place.text?.text ?? "",
-      placeName: place.text?.text ?? "",
+      placeId:
+        place.placeId,
+
+      name:
+        place.structuredFormat
+          ?.mainText?.text ??
+        place.text?.text ??
+        "",
+
+      placeName:
+        place.text?.text ?? "",
     }))
-    .filter((city: CitySuggestion) => city.name.trim().length > 0);
+    .filter(
+      (city: CitySuggestion) =>
+        city.name.trim().length >
+        0,
+    );
 };
 
 export const getPlaceDetails = async (
@@ -127,8 +198,12 @@ export const getPlaceDetails = async (
     {
       method: "GET",
       headers: {
-        "X-Goog-Api-Key": API_KEY ?? "",
-        "X-Goog-Session-Token": sessionToken,
+        "X-Goog-Api-Key":
+          API_KEY ?? "",
+
+        "X-Goog-Session-Token":
+          sessionToken,
+
         "X-Goog-FieldMask":
           "id,displayName,formattedAddress,addressComponents,location",
       },
@@ -136,33 +211,60 @@ export const getPlaceDetails = async (
   );
 
   if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`Place details failed: ${response.status} ${errorText}`);
+    const errorText =
+      await response.text();
+
+    throw new Error(
+      `Place details failed: ${response.status} ${errorText}`,
+    );
   }
 
-  const data = await response.json();
+  const data =
+    await response.json();
 
   return {
     placeId: data.id,
-    venueName: data.displayName?.text ?? "",
-    city: extractCity(data.addressComponents),
-    formattedAddress: data.formattedAddress,
-    latitude: data.location?.latitude,
-    longitude: data.location?.longitude,
+
+    venueName:
+      data.displayName?.text ??
+      "",
+
+    city:
+      extractCity(
+        data.addressComponents,
+      ),
+
+    formattedAddress:
+      data.formattedAddress,
+
+    latitude:
+      data.location?.latitude,
+
+    longitude:
+      data.location?.longitude,
   };
 };
 
-const extractCity = (components: any[] = []): string => {
+const extractCity = (
+  components: any[] = [],
+): string => {
   const preferredTypes = [
     "locality",
     "postal_town",
     "administrative_area_level_2",
   ];
 
-  for (const type of preferredTypes) {
-    const match = components.find((component) =>
-      (component.types ?? []).includes(type),
-    );
+  for (
+    const type of
+    preferredTypes
+  ) {
+    const match =
+      components.find(
+        (component) =>
+          (
+            component.types ?? []
+          ).includes(type),
+      );
 
     if (match?.longText) {
       return match.longText;
