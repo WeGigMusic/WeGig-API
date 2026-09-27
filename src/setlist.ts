@@ -124,6 +124,7 @@ function getCacheKey(input: {
   artistMbid?: string;
   city?: string;
   venue?: string;
+  date?: string;
   page: number;
 }): string {
   const artistKey = input.artistMbid?.trim()
@@ -134,6 +135,7 @@ function getCacheKey(input: {
     artistKey,
     `city:${norm(input.city)}`,
     `venue:${norm(input.venue)}`,
+    `date:${input.date ?? ""}`,
     `page:${input.page}`,
   ].join("|");
 }
@@ -143,6 +145,7 @@ function getCached(input: {
   artistMbid?: string;
   city?: string;
   venue?: string;
+  date?: string;
   page: number;
 }): SetlistSearchResult | undefined {
   const key = getCacheKey(input);
@@ -164,6 +167,7 @@ function setCached(
     artistMbid?: string;
     city?: string;
     venue?: string;
+    date?: string;
     page: number;
   },
   value: SetlistSearchResult,
@@ -390,6 +394,7 @@ export async function searchSetlistsByArtist(
   filters?: {
   city?: string;
   venue?: string;
+  date?: string;
   page?: number;
 },
 ): Promise<SetlistSearchResult> {
@@ -411,6 +416,7 @@ export async function searchSetlistsByArtist(
     artistMbid,
     city: filters?.city,
     venue: filters?.venue,
+    date: filters?.date,
     page,
   };
 
@@ -425,6 +431,7 @@ export async function searchSetlistsByArtist(
       artistName: artistMbid?.trim() ? undefined : query,
       cityName: filters?.city?.trim() || undefined,
       venueName: filters?.venue?.trim() || undefined,
+      date: filters?.date,
       p: page,
     });
     
