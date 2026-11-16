@@ -14,6 +14,7 @@ import {
   searchCities,
 } from "./googlePlaces";
 import prisma from "./prisma";
+import supportRouter from "./support";
 import {
   requireAuth,
   type AuthedRequest,
@@ -359,6 +360,8 @@ app.use(
     next();
   },
 );
+
+app.use("/support", supportRouter);
 
 app.get(
   "/",

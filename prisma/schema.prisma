@@ -47,3 +47,17 @@ model Artist {
   @@index([name])
   @@index([mbid])
 }
+
+model SupportPurchase {
+  id             String   @id @default(uuid())
+  userId         String
+  platform       String
+  environment    String
+  transactionKey String
+  productId      String
+  purchasedAt    DateTime
+  createdAt      DateTime @default(now())
+
+  @@unique([platform, environment, transactionKey])
+  @@index([userId, environment])
+}
