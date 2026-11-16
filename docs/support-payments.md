@@ -1,8 +1,9 @@
 # Support payments: API foundation
 
 This patch adds authenticated GET /support/status and POST /support/verify.
-Payments remain unavailable unless SUPPORT_PAYMENTS_ENABLED=true. Do not enable
-this in production until the mobile purchase flow and refund handling are ready.
+Payments remain unavailable unless SUPPORT_PAYMENTS_ENABLED=true and
+SUPPORT_NOTIFICATIONS_ENABLED=true. Follow docs/support-refunds.md for refund
+notification configuration before enabling production payments.
 
 ## Install and check locally
 
@@ -52,14 +53,8 @@ environment, product ID, transaction identifier (hashed Google token), and dates
 The transaction unique constraint prevents duplicate recording across retries.
 Provider errors are not logged because they can contain purchase tokens.
 
-Still required before release: mobile billing integration, store credentials,
-real sandbox/TestFlight and Play internal-test purchases, database migration
-validation against a test PostgreSQL database, refund/revocation notification
-processing, and account deletion/retention handling for purchase records.
-Status currently reflects recorded verified purchases; it does not automatically
-remove supporter status for a refund issued after verification. Do not enable
-production payments until that lifecycle is implemented.
-
-Validation performed for this patch: Prisma Client generation, TypeScript build,
-and seven automated policy tests. No real store calls or database migration were
-performed, because store credentials and a test database were not supplied.
+Refund notifications, reversals and database race protection are implemented in
+docs/support-refunds.md. Follow that document for configuration and validation.
+Still required before release: account-deletion/retention handling, credentials,
+notification setup, deployment, and real store purchase/refund tests. Keep new
+payments disabled until those checks are complete.

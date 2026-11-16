@@ -15,6 +15,7 @@ import {
 } from "./googlePlaces";
 import prisma from "./prisma";
 import supportRouter from "./support";
+import supportNotifications from "./supportNotifications";
 import {
   requireAuth,
   type AuthedRequest,
@@ -361,6 +362,7 @@ app.use(
   },
 );
 
+app.use("/support/notifications", supportNotifications);
 app.use("/support", supportRouter);
 
 app.get(

@@ -1,14 +1,13 @@
 import { Router } from "express";
-import { Prisma } from "@prisma/client";
-import prisma from "./prisma";
 import { requireAuth, type AuthedRequest } from "./auth";
-import { canUseSandbox, googleAccountId, requireProduct, SupportError } from "./supportPolicy";
+import { googleAccountId, requireProduct, SupportError } from "./supportPolicy";
+import { recordSupportPurchase, getSupporterStatus } from "./supportLedger";
 import { verifySupportPurchase } from "./supportVerification";
 
 const router = Router();
 router.use(requireAuth);
 router.use((_req, res, next) => {
-  if (process.env.SUPPORT_PAYMENTS_ENABLED !== "true") {
+  if (process.env.SUPPORT_PAYMENTS_ENABLED !== "true" || process.env.SUPPORT_NOTIFICATIONS_ENABLED !== "true") {
     return res.status(503).json({ code: "SUPPORT_NOT_AVAILABLE", message: "Support payments aren't available yet." });
   }
   next();
@@ -28,20 +27,10 @@ router.use((req: AuthedRequest, res, next) => {
   next();
 });
 
-async function status(userId: string) {
-  const purchases = await prisma.supportPurchase.findMany({
-    where: { userId, environment: { in: canUseSandbox(userId) ? ["production", "sandbox"] : ["production"] } },
-    select: { environment: true },
-    distinct: ["environment"],
-  });
-  const isFoundingSupporter = purchases.some((purchase) => purchase.environment === "production");
-  return { isFoundingSupporter, isTestSupporter: !isFoundingSupporter && purchases.some((purchase) => purchase.environment === "sandbox") };
-}
-
 router.get("/status", async (req: AuthedRequest, res) => {
   try {
     const userId = req.user!.id;
-    return res.json({ ...await status(userId), appleAppAccountToken: userId, googleObfuscatedAccountId: googleAccountId(userId) });
+    return res.json({ ...await getSupporterStatus(userId), appleAppAccountToken: userId, googleObfuscatedAccountId: googleAccountId(userId) });
   } catch {
     return res.status(503).json({ message: "Support status is unavailable. Please try again later." });
   }
@@ -57,15 +46,9 @@ router.post("/verify", async (req: AuthedRequest, res) => {
     requireProduct(platform, productId);
     const userId = req.user!.id;
     const purchase = await verifySupportPurchase(userId, { platform, productId, proof });
-    try {
-      await prisma.supportPurchase.create({ data: { ...purchase, userId } });
-    } catch (error) {
-      if (!(error instanceof Prisma.PrismaClientKnownRequestError) || error.code !== "P2002") throw error;
-      const existing = await prisma.supportPurchase.findUnique({ where: { platform_environment_transactionKey: { platform: purchase.platform, environment: purchase.environment, transactionKey: purchase.transactionKey } } });
-      if (!existing || existing.userId !== userId || existing.productId !== productId) throw new SupportError(409, "PURCHASE_ALREADY_CLAIMED");
-    }
+    await recordSupportPurchase(userId, purchase);
     // The client may finish/consume the transaction only after this response.
-    return res.json({ verified: true, environment: purchase.environment, ...await status(userId) });
+    return res.json({ verified: true, environment: purchase.environment, ...await getSupporterStatus(userId) });
   } catch (error) {
     if (error instanceof SupportError) return res.status(error.status).json({ code: error.code, message: error.code === "PAYMENT_PENDING" ? "Your payment is awaiting approval." : "We couldn't confirm this contribution." });
     // Never log provider exceptions: Google errors may include the purchase token in the URL.

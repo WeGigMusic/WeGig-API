@@ -56,8 +56,20 @@ model SupportPurchase {
   transactionKey String
   productId      String
   purchasedAt    DateTime
+  revokedAt      DateTime?
   createdAt      DateTime @default(now())
 
   @@unique([platform, environment, transactionKey])
   @@index([userId, environment])
+}
+
+model SupportStoreState {
+  platform       String
+  environment    String
+  transactionKey String
+  productId      String
+  eventAt        DateTime
+  revokedAt      DateTime?
+
+  @@id([platform, environment, transactionKey], name: "platform_environment_transactionKey")
 }
