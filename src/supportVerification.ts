@@ -23,7 +23,7 @@ async function verifyApple(userId: string, productId: string, transactionId: str
   try {
     response = await client(environment).getTransactionInfo(transactionId);
   } catch (error) {
-    if (!(error instanceof APIException) || error.httpStatusCode !== 404 || !canUseSandbox(userId)) throw error;
+    if (!(error instanceof APIException) || ![401, 404].includes(error.httpStatusCode) || !canUseSandbox(userId)) throw error;
     environment = Environment.SANDBOX;
     response = await client(environment).getTransactionInfo(transactionId);
   }
