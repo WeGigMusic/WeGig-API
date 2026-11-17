@@ -2164,7 +2164,10 @@ app.get(
             ...skiddleEvents,
           ]);
 
-       const eventsWithImages = events;
+        const eventsWithImages =
+          await addArtistImages(
+            events,
+          );
 
         console.log(
           "[events/search] future results",
