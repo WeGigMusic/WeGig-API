@@ -50,7 +50,7 @@ model Artist {
 
 model SupportPurchase {
   id             String   @id @default(uuid())
-  userId         String
+  userId         String?
   platform       String
   environment    String
   transactionKey String
@@ -72,4 +72,10 @@ model SupportStoreState {
   revokedAt      DateTime?
 
   @@id([platform, environment, transactionKey], name: "platform_environment_transactionKey")
+}
+
+model AccountDeletion {
+  userIdHash  String    @id
+  requestedAt DateTime  @default(now())
+  completedAt DateTime?
 }

@@ -8,7 +8,7 @@ import multer from "multer";
 import { randomUUID } from "crypto";
 import { unlink } from "fs/promises";
 import "dotenv/config";
-
+import accountRouter from "./account";
 import {
   createSessionToken,
   searchCities,
@@ -364,7 +364,7 @@ app.use(
 
 app.use("/support/notifications", supportNotifications);
 app.use("/support", supportRouter);
-
+app.use("/account", accountRouter);
 app.get(
   "/",
   (
