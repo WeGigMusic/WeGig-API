@@ -1,3 +1,4 @@
+import { safeErrorDetails } from "./safeError";
 import express, {
   Request,
   Response,
@@ -191,13 +192,7 @@ async function addArtistImages(
         {
           artistName,
 
-          message:
-            error instanceof
-            Error
-              ? error.message
-              : String(
-                  error,
-                ),
+          error: safeErrorDetails(error),
         },
       );
 
@@ -513,7 +508,7 @@ app.get(
     ) {
       console.error(
         "[places/cities/search] failed",
-        "Operation failed",
+        safeErrorDetails(e),
       );
 
       return res
@@ -629,7 +624,7 @@ app.get(
     ) {
       console.error(
         "Error fetching gigs from Prisma:",
-        "Operation failed",
+        safeErrorDetails(error),
       );
 
       return res
@@ -1252,7 +1247,7 @@ app.post(
     ) {
       console.error(
         "Error saving gig to Prisma:",
-        "Operation failed",
+        safeErrorDetails(error),
       );
 
       return res
@@ -1773,7 +1768,7 @@ app.patch(
     ) {
       console.error(
         "Error updating gig in Prisma:",
-        "Operation failed",
+        safeErrorDetails(error),
       );
 
       return res
@@ -1841,7 +1836,7 @@ app.delete(
     ) {
       console.error(
         "Error deleting gig in Prisma:",
-        "Operation failed",
+        safeErrorDetails(error),
       );
 
       return res
@@ -1916,7 +1911,7 @@ app.post(
     ) {
       console.error(
         "OCR route failed:",
-        "Operation failed",
+        safeErrorDetails(error),
       );
 
       return res
@@ -2096,7 +2091,7 @@ app.get(
         ) {
           console.error(
             "[events/search] Ticketmaster failed",
-            "Operation failed",
+            safeErrorDetails(tmResult.reason),
           );
         }
 
@@ -2106,7 +2101,7 @@ app.get(
         ) {
           console.error(
             "[events/search] Skiddle failed",
-            "Operation failed",
+            safeErrorDetails(skiddleResult.reason),
           );
         }
 
@@ -2236,7 +2231,7 @@ app.get(
     ) {
       console.error(
         "[events/search] failed",
-        "Operation failed",
+        safeErrorDetails(e),
       );
 
       return res
@@ -2486,7 +2481,7 @@ app.get(
       ) {
         console.error(
           "[discover/events] Ticketmaster failed",
-          "Operation failed",
+          safeErrorDetails(tmResult.reason),
         );
       }
 
@@ -2496,7 +2491,7 @@ app.get(
       ) {
         console.error(
           "[discover/events] Skiddle failed",
-          "Operation failed",
+          safeErrorDetails(skiddleResult.reason),
         );
       }
 
@@ -2528,7 +2523,7 @@ app.get(
     ) {
       console.error(
         "[discover/events] failed",
-        "Operation failed",
+        safeErrorDetails(e),
       );
 
       return res
@@ -2681,7 +2676,7 @@ app.get(
     ) {
       console.error(
         "MusicBrainz search error:",
-        "Operation failed",
+        safeErrorDetails(err),
       );
 
       return res
@@ -2689,12 +2684,6 @@ app.get(
         .json({
           message:
             "Failed to fetch from MusicBrainz",
-
-          detail:
-            err?.message ??
-            String(
-              err,
-            ),
         });
     }
   },
@@ -2737,7 +2726,7 @@ app.get(
     ) {
       console.error(
         "MusicBrainz releases error:",
-        "Operation failed",
+        safeErrorDetails(err),
       );
 
       return res
@@ -2745,12 +2734,6 @@ app.get(
         .json({
           message:
             "Failed to fetch artist releases from MusicBrainz",
-
-          detail:
-            err?.message ??
-            String(
-              err,
-            ),
         });
     }
   },
@@ -2805,7 +2788,7 @@ app.get(
     ) {
       console.error(
         "[artists/image] failed",
-        "Operation failed",
+        safeErrorDetails(error),
       );
 
       return res
@@ -3237,7 +3220,7 @@ app.use(
   ) => {
     console.error(
       "Unhandled error:",
-      "Operation failed",
+      safeErrorDetails(err),
     );
 
     res

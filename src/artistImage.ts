@@ -1,3 +1,4 @@
+import { safeErrorDetails } from "./safeError";
 import prisma from "./prisma";
 import { searchAppleMusicArtistImage } from "./appleMusic";
 import { searchSpotifyArtist } from "./spotify";
@@ -55,10 +56,7 @@ if (appleResult?.imageUrl) {
   } catch (error) {
     console.warn("[artist-image] Apple lookup failed", {
       artistName: name,
-      message:
-        error instanceof Error
-          ? error.message
-          : String(error),
+      error: safeErrorDetails(error),
     });
   }
 
@@ -75,10 +73,7 @@ if (appleResult?.imageUrl) {
     } catch (error) {
       console.warn("[artist-image] Spotify lookup failed", {
         artistName: name,
-        message:
-          error instanceof Error
-            ? error.message
-            : String(error),
+        error: safeErrorDetails(error),
       });
     }
   }

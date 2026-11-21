@@ -1,3 +1,4 @@
+import { safeErrorDetails } from "./safeError";
 import { createPrivateKey, sign } from "node:crypto";
 import { readFile } from "node:fs/promises";
 
@@ -106,10 +107,7 @@ async function getPrivateKey(): Promise<string> {
 
   console.log(
     "[apple-music] private key loaded",
-    {
-      path,
-      length: cleanedKey.length,
-    },
+
   );
 
   return cachedPrivateKey;
@@ -242,13 +240,12 @@ async function appleMusicGet<T>(
     });
 
     if (!response.ok) {
-      const text =
-        await response.text().catch(
+      await response.text().catch(
           () => "",
         );
 
       throw new Error(
-        `Apple Music GET failed: ${response.status} ${path} ${text}`,
+        `Apple Music GET failed: ${response.status}`,
       );
     }
 
@@ -449,7 +446,6 @@ export async function searchAppleMusicArtistImage(
       console.warn(
         "[apple-music] rejected weak artist match",
         {
-          query,
           candidate:
             best?.artist.attributes?.name ??
             null,
@@ -481,11 +477,7 @@ export async function searchAppleMusicArtistImage(
     console.error(
       "[apple-music] artist lookup failed",
       {
-        query,
-        message:
-          error instanceof Error
-            ? error.message
-            : String(error),
+        error: safeErrorDetails(error),
       },
     );
 
@@ -577,10 +569,7 @@ export async function searchAppleMusicReleaseImage(
       {
         artist,
         title,
-        message:
-          error instanceof Error
-            ? error.message
-            : String(error),
+        error: safeErrorDetails(error),
       },
     );
 

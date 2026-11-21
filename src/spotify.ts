@@ -1,3 +1,4 @@
+import { safeErrorDetails } from "./safeError";
 import { env } from "./env";
 import { normaliseArtistName } from "./utils/normaliseArtistName";
 import {
@@ -335,15 +336,14 @@ async function getSpotifyAccessToken(): Promise<string> {
     );
 
   if (!res.ok) {
-    const text =
-      await res
+    await res
         .text()
         .catch(
           () => "",
         );
 
     throw new Error(
-      `Spotify token failed: ${res.status} ${text}`,
+      `Spotify token failed: ${res.status}`,
     );
   }
 
@@ -697,7 +697,6 @@ async function getAppleFallbackArtist(
     console.log(
       "[spotify] using Apple Music artist fallback after Spotify failure",
       {
-        query,
         appleMusicArtist:
           appleArtist.name,
       },
@@ -731,15 +730,8 @@ async function getAppleFallbackArtist(
     console.warn(
       "[spotify] Apple Music artist fallback failed",
       {
-        query,
 
-        message:
-          error instanceof
-          Error
-            ? error.message
-            : String(
-                error,
-              ),
+        error: safeErrorDetails(error),
       },
     );
 
@@ -925,7 +917,6 @@ async function getBestMatchingSpotifyArtist(
     console.warn(
       "[spotify] rejected weak artist match",
       {
-        query,
 
         chosenName:
           best.artist
@@ -989,7 +980,6 @@ export async function searchSpotifyArtist(
     console.warn(
       "[spotify] rate limited during artist search; falling back to Apple Music",
       {
-        query,
       },
     );
 
@@ -1057,7 +1047,6 @@ export async function searchSpotifyArtist(
       console.log(
         "[spotify] using Apple Music artwork fallback",
         {
-          query,
 
           spotifyArtist:
             best.name,
@@ -1248,13 +1237,7 @@ async function getMusicBrainzReleasesForArtist(
           spotifyArtistName ||
           fallbackName,
 
-        message:
-          error instanceof
-          Error
-            ? error.message
-            : String(
-                error,
-              ),
+        error: safeErrorDetails(error),
       },
     );
 
@@ -1411,13 +1394,7 @@ async function enrichReleaseArtwork(
           release:
             release.title,
 
-          message:
-            error instanceof
-            Error
-              ? error.message
-              : String(
-                  error,
-                ),
+          error: safeErrorDetails(error),
         },
       );
 
@@ -1480,7 +1457,6 @@ export async function getSpotifyArtistPage(
     console.warn(
       "[spotify] rate limited loading artist page; using Apple Music fallback",
       {
-        query,
       },
     );
 
@@ -1578,7 +1554,6 @@ export async function getSpotifyArtistPage(
         console.log(
           "[spotify] using Apple Music artwork fallback",
           {
-            query,
 
             spotifyArtist:
               best.name,
@@ -1592,15 +1567,8 @@ export async function getSpotifyArtistPage(
       console.warn(
         "[spotify] Apple Music artist artwork failed",
         {
-          query,
 
-          message:
-            error instanceof
-            Error
-              ? error.message
-              : String(
-                  error,
-                ),
+          error: safeErrorDetails(error),
         },
       );
     }
@@ -1626,18 +1594,11 @@ export async function getSpotifyArtistPage(
     console.error(
       "[spotify] failed to fetch albums",
       {
-        query,
 
         artistId:
           best.id,
 
-        message:
-          error instanceof
-          Error
-            ? error.message
-            : String(
-                error,
-              ),
+        error: safeErrorDetails(error),
       },
     );
   }
@@ -1656,18 +1617,11 @@ export async function getSpotifyArtistPage(
     console.error(
       "[spotify] failed to derive top tracks from albums",
       {
-        query,
 
         artistId:
           best.id,
 
-        message:
-          error instanceof
-          Error
-            ? error.message
-            : String(
-                error,
-              ),
+        error: safeErrorDetails(error),
       },
     );
   }
@@ -1696,13 +1650,7 @@ export async function getSpotifyArtistPage(
           artist:
             best.name,
 
-          message:
-            error instanceof
-            Error
-              ? error.message
-              : String(
-                  error,
-                ),
+          error: safeErrorDetails(error),
         },
       );
     }

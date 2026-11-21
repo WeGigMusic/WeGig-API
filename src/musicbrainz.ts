@@ -282,8 +282,7 @@ async function fetchMbJson<T>(
         ) as T;
       }
 
-      const text =
-        await res
+      await res
           .text()
           .catch(() => "");
 
@@ -297,7 +296,7 @@ async function fetchMbJson<T>(
       }
 
       throw new Error(
-        `MusicBrainz ${res.status}: ${text}`,
+        `MusicBrainz ${res.status}`,
       );
     } catch (error) {
       if (
