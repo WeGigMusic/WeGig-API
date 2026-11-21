@@ -134,6 +134,18 @@ router.post("/verify", async (req: AuthedRequest, res) => {
       ...await getSupporterStatus(userId),
     });
   } catch (error) {
+    const providerError = error as {
+      response?: { status?: number };
+    };
+
+    console.warn("[support/verify] failure", {
+      platform: req.body?.platform === "google" ? "google" : "apple",
+      code: error instanceof SupportError
+        ? error.code
+        : "PROVIDER_OR_INTERNAL_ERROR",
+      providerStatus: providerError.response?.status ?? null,
+    });
+
     if (error instanceof SupportError) {
       return res.status(error.status).json({
         code: error.code,
