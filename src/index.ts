@@ -513,7 +513,7 @@ app.get(
     ) {
       console.error(
         "[places/cities/search] failed",
-        e,
+        "Operation failed",
       );
 
       return res
@@ -538,12 +538,6 @@ app.get(
       const userId =
         req.user!.id;
 
-      console.log(
-        "[gigs] fetching gigs",
-        {
-          userId,
-        },
-      );
 
       const dbGigs =
         await prisma.gig.findMany(
@@ -635,7 +629,7 @@ app.get(
     ) {
       console.error(
         "Error fetching gigs from Prisma:",
-        error,
+        "Operation failed",
       );
 
       return res
@@ -658,24 +652,6 @@ app.post(
     const userId =
       req.user!.id;
 
-    console.log(
-      "[gigs] creating gig",
-      {
-        userId,
-
-        artist:
-          req.body?.artist,
-
-        venue:
-          req.body?.venue,
-
-        city:
-          req.body?.city,
-
-        date:
-          req.body?.date,
-      },
-    );
 
     const gigInput =
       req.body as
@@ -1276,7 +1252,7 @@ app.post(
     ) {
       console.error(
         "Error saving gig to Prisma:",
-        error,
+        "Operation failed",
       );
 
       return res
@@ -1797,7 +1773,7 @@ app.patch(
     ) {
       console.error(
         "Error updating gig in Prisma:",
-        error,
+        "Operation failed",
       );
 
       return res
@@ -1865,7 +1841,7 @@ app.delete(
     ) {
       console.error(
         "Error deleting gig in Prisma:",
-        error,
+        "Operation failed",
       );
 
       return res
@@ -1940,7 +1916,7 @@ app.post(
     ) {
       console.error(
         "OCR route failed:",
-        error,
+        "Operation failed",
       );
 
       return res
@@ -2028,30 +2004,6 @@ app.get(
           size,
         );
 
-      console.log(
-        "[events/search] query",
-        {
-          mode:
-            searchMode,
-
-          keyword:
-            kw,
-
-          city,
-          venue,
-          latlong,
-          latitude,
-          longitude,
-
-          radius:
-            radiusNumber,
-
-          unit,
-
-          size:
-            sizeNumber,
-        },
-      );
 
       if (
         searchMode ===
@@ -2144,7 +2096,7 @@ app.get(
         ) {
           console.error(
             "[events/search] Ticketmaster failed",
-            tmResult.reason,
+            "Operation failed",
           );
         }
 
@@ -2154,7 +2106,7 @@ app.get(
         ) {
           console.error(
             "[events/search] Skiddle failed",
-            skiddleResult.reason,
+            "Operation failed",
           );
         }
 
@@ -2284,7 +2236,7 @@ app.get(
     ) {
       console.error(
         "[events/search] failed",
-        e,
+        "Operation failed",
       );
 
       return res
@@ -2326,10 +2278,6 @@ app.get(
             ? keyword
             : undefined;
 
-      console.log(
-        "[tm/events/search] query",
-        req.query,
-      );
 
       const data =
         await searchTmEventsUk(
@@ -2445,28 +2393,6 @@ app.get(
           radius,
         );
 
-      console.log(
-        "[discover/events] query",
-        {
-          keyword:
-            kw,
-
-          city,
-
-          latlong,
-
-          latitude,
-
-          longitude,
-
-          radius:
-            radiusNumber,
-
-          unit,
-
-          size,
-        },
-      );
 
       const [
         tmResult,
@@ -2560,7 +2486,7 @@ app.get(
       ) {
         console.error(
           "[discover/events] Ticketmaster failed",
-          tmResult.reason,
+          "Operation failed",
         );
       }
 
@@ -2570,7 +2496,7 @@ app.get(
       ) {
         console.error(
           "[discover/events] Skiddle failed",
-          skiddleResult.reason,
+          "Operation failed",
         );
       }
 
@@ -2602,7 +2528,7 @@ app.get(
     ) {
       console.error(
         "[discover/events] failed",
-        e,
+        "Operation failed",
       );
 
       return res
@@ -2755,7 +2681,7 @@ app.get(
     ) {
       console.error(
         "MusicBrainz search error:",
-        err,
+        "Operation failed",
       );
 
       return res
@@ -2811,7 +2737,7 @@ app.get(
     ) {
       console.error(
         "MusicBrainz releases error:",
-        err,
+        "Operation failed",
       );
 
       return res
@@ -2879,7 +2805,7 @@ app.get(
     ) {
       console.error(
         "[artists/image] failed",
-        error,
+        "Operation failed",
       );
 
       return res
@@ -3311,7 +3237,7 @@ app.use(
   ) => {
     console.error(
       "Unhandled error:",
-      err,
+      "Operation failed",
     );
 
     res
