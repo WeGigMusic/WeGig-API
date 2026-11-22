@@ -40,14 +40,16 @@ export function checkGooglePurchase(data: {
   testPurchaseContext?: unknown;
 }, userId: string, productId: string, token: string): VerifiedSupportPurchase {
   requireProduct("google", productId);
-  if (data.purchaseStateContext?.purchaseState === "PENDING") throw new SupportError(409, "PAYMENT_PENDING");
-  if (data.purchaseStateContext?.purchaseState !== "PURCHASED") throw new SupportError(400, "PAYMENT_NOT_PURCHASED");
+  const state = data.purchaseStateContext?.purchaseState;
+  if (state === "PENDING") throw new SupportError(409, "PAYMENT_PENDING");
+  if (state !== "PURCHASED" && state !== "CANCELLED") throw new SupportError(400, "PAYMENT_NOT_PURCHASED");
   if (data.obfuscatedExternalAccountId !== googleAccountId(userId)) throw new SupportError(403, "PURCHASE_ACCOUNT_MISMATCH");
   const items = data.productLineItem ?? [];
   const item = items[0];
   if (items.length !== 1 || item.productId !== productId || item.productOfferDetails?.quantity !== 1) {
     throw new SupportError(400, "PURCHASE_PRODUCT_MISMATCH");
   }
+  if (state === "CANCELLED") throw new SupportError(409, "PAYMENT_CANCELLED");
   if (item.productOfferDetails?.refundableQuantity === 0) throw new SupportError(400, "PURCHASE_REFUNDED");
   const purchasedAt = new Date(data.purchaseCompletionTime ?? "");
   if (!Number.isFinite(purchasedAt.getTime())) throw new SupportError(400, "INVALID_PURCHASE_DATE");

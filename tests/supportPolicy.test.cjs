@@ -12,7 +12,7 @@ test('accepts a paid purchase and stores a hash instead of the token', () => {
  assert.equal(result.environment, 'production'); assert.match(result.transactionKey, /^[a-f0-9]{64}$/); assert.equal(JSON.stringify(result).includes('secret-token'), false);
 });
 test('pending and cancelled payments cannot grant supporter status', () => {
- for (const [state, code] of [['PENDING','PAYMENT_PENDING'], ['CANCELLED','PAYMENT_NOT_PURCHASED']]) { const data = purchase(); data.purchaseStateContext.purchaseState = state; rejects(data, code); }
+ for (const [state, code] of [['PENDING','PAYMENT_PENDING'], ['CANCELLED','PAYMENT_CANCELLED']]) { const data = purchase(); data.purchaseStateContext.purchaseState = state; rejects(data, code); }
 });
 test('rejects purchases bound to another account', () => { const data = purchase(); data.obfuscatedExternalAccountId = googleAccountId('someone-else'); rejects(data, 'PURCHASE_ACCOUNT_MISMATCH'); });
 test('rejects mismatched products, multiple items and unexpected quantities', () => {
@@ -28,4 +28,10 @@ test('sandbox requires an explicit test account and stays sandbox', () => {
 test('allowlist accepts only the seven exact IDs for each store', () => {
  for (const suffix of ['small','medium','large','extra1','extra20','extra50','extra100']) { assert.equal(isSupportProduct('google','com.wegig.app.support.'+suffix),true); assert.equal(isSupportProduct('apple','com.wegig.mobile.support.'+suffix),true); }
  assert.equal(isSupportProduct('apple',product),false); assert.equal(isSupportProduct('google',product+'.forged'),false);
+});
+
+test('cancelled store responses must still match the account and product', () => {
+ const data = purchase(); data.purchaseStateContext.purchaseState = 'CANCELLED';
+ rejects({...data, obfuscatedExternalAccountId: 'other-account'}, 'PURCHASE_ACCOUNT_MISMATCH');
+ rejects({...data, productLineItem: []}, 'PURCHASE_PRODUCT_MISMATCH');
 });
