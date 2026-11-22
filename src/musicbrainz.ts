@@ -58,7 +58,8 @@ type CacheEntry<T> = {
 const cache =
   new Map<string, CacheEntry<unknown>>();
 
-let lastRequestAt = 0;
+let nextRequestAt = 0;
+let requestSlot = Promise.resolve();
 
 function sleep(ms: number) {
   return new Promise<void>((resolve) =>
@@ -66,16 +67,14 @@ function sleep(ms: number) {
   );
 }
 
-async function throttleOneReqPerSec() {
-  const now = Date.now();
-  const delta =
-    now - lastRequestAt;
-
-  if (delta < 1000) {
-    await sleep(1000 - delta);
-  }
-
-  lastRequestAt = Date.now();
+function throttleOneReqPerSec(): Promise<void> {
+  // Queue the start time so simultaneous callers cannot sleep until the same slot.
+  requestSlot = requestSlot.then(async () => {
+    const delay = nextRequestAt - performance.now();
+    if (delay > 0) await sleep(Math.ceil(delay));
+    nextRequestAt = performance.now() + 1000;
+  });
+  return requestSlot;
 }
 
 function getUserAgent() {
