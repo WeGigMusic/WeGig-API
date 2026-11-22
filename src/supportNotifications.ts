@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { OAuth2Client } from "google-auth-library";
 import { Environment, VerificationException, VerificationStatus } from "@apple/app-store-server-library";
+import { safeErrorDetails } from "./safeError";
 import { SupportError } from "./supportPolicy";
 import { appleSignedDataVerifier, lookupGooglePurchase, requiredSupportSetting } from "./supportVerification";
 import { applySupportRefund } from "./supportLedger";
@@ -29,10 +30,16 @@ router.post("/apple/:environment", async (req, res) => {
     if (!notification.data?.signedTransactionInfo) return res.sendStatus(400);
     const transaction = await verifier.verifyAndDecodeTransaction(notification.data.signedTransactionInfo);
     const event = appleRefundEvent(notification, transaction, req.params.environment);
-    if (event) await applySupportRefund(event);
+    if (event) {
+      const applied = await applySupportRefund(event);
+      console.info("[support/notifications] refund", { platform: "apple", environment: event.environment, applied });
+    }
     return res.sendStatus(204);
   } catch (error) {
-    // Payloads, signatures, tokens and provider exceptions must not enter logs.
+    console.warn("[support/notifications] failure", {
+      platform: "apple",
+      ...(error instanceof SupportError ? { code: error.code, status: error.status } : safeErrorDetails(error)),
+    });
     if (error instanceof VerificationException && error.status !== VerificationStatus.RETRYABLE_VERIFICATION_FAILURE) return res.sendStatus(401);
     if (error instanceof SupportError) return res.sendStatus(error.status);
     return res.sendStatus(503);
@@ -61,11 +68,20 @@ router.post("/google", async (req, res) => {
     if (token) {
       const purchase = await lookupGooglePurchase(token);
       const event = googleRefundEvent(notification, token, purchase);
-      if (event) await applySupportRefund(event);
+      if (event) {
+        const applied = await applySupportRefund(event);
+        console.info("[support/notifications] refund", { platform: "google", environment: event.environment, applied });
+      } else {
+        console.info("[support/notifications] Google refund skipped", { reason: "not_a_support_product" });
+      }
     }
     // HTTP success acknowledges the message only after the DB transaction commits.
     return res.sendStatus(204);
   } catch (error) {
+    console.warn("[support/notifications] failure", {
+      platform: "google",
+      ...(error instanceof SupportError ? { code: error.code, status: error.status } : safeErrorDetails(error)),
+    });
     if (error instanceof SupportError) return res.sendStatus(error.status);
     return res.sendStatus(503);
   }
