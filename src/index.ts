@@ -1851,6 +1851,13 @@ app.delete(
 
 app.post(
   "/ocr/ticket",
+  (_req: Request, res: Response, next: NextFunction) => {
+    if (process.env.TICKET_SCANNING_ENABLED !== "true") {
+      return res.sendStatus(404);
+    }
+    next();
+  },
+  requireAuth,
   upload.single(
     "ticket",
   ),
