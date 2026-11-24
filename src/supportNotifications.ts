@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { OAuth2Client } from "google-auth-library";
-import { Environment, VerificationException, VerificationStatus } from "@apple/app-store-server-library";
+import { Environment, NotificationTypeV2, VerificationException, VerificationStatus } from "@apple/app-store-server-library";
 import { safeErrorDetails } from "./safeError";
 import { SupportError } from "./supportPolicy";
 import { appleSignedDataVerifier, lookupGooglePurchase, requiredSupportSetting } from "./supportVerification";
@@ -26,6 +26,14 @@ router.post("/apple/:environment", async (req, res) => {
     // Do not decode untrusted JSON to choose the verifier/environment.
     const verifier = appleSignedDataVerifier(environment);
     const notification = await verifier.verifyAndDecodeNotification(signedPayload);
+    if (notification.notificationType === NotificationTypeV2.RESCIND_CONSENT) {
+      const appTransaction = notification.appData?.signedAppTransactionInfo;
+      if (!appTransaction) return res.sendStatus(400);
+      await verifier.verifyAndDecodeAppTransaction(appTransaction);
+      // The App Store blocks app access. Record receipt without storing the app transaction.
+      console.info("[store/notifications] parental consent withdrawn", { environment });
+      return res.sendStatus(204);
+    }
     if (!["REFUND", "REVOKE", "REFUND_REVERSED"].includes(notification.notificationType ?? "")) return res.sendStatus(204);
     if (!notification.data?.signedTransactionInfo) return res.sendStatus(400);
     const transaction = await verifier.verifyAndDecodeTransaction(notification.data.signedTransactionInfo);

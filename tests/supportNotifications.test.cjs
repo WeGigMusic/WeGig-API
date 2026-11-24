@@ -34,3 +34,29 @@ test('unknown environment endpoints cannot select a permissive verifier',async()
  process.env.SUPPORT_NOTIFICATIONS_ENABLED='true';
  assert.equal((await post('apple/unknown',{signedPayload:'e30.e30.e30'})).status,404);
 });
+
+test('Apple consent withdrawal verifies the app transaction without touching purchases or logging identifiers', async ({ mock }) => {
+ const verification = require('../dist/supportVerification');
+ const receipt = 'test.signed.receipt';
+ let appTransaction = receipt;
+ const verify = mock.fn(async token => assert.equal(token, receipt));
+ const info = mock.method(console, 'info', () => {});
+ mock.method(verification, 'appleSignedDataVerifier', () => ({
+  verifyAndDecodeNotification: async () => ({
+   notificationType: 'RESCIND_CONSENT',
+   appData: { signedAppTransactionInfo: appTransaction },
+  }),
+  verifyAndDecodeAppTransaction: verify,
+  verifyAndDecodeTransaction: () => assert.fail('consent notifications must not verify purchases'),
+ }));
+ process.env.SUPPORT_NOTIFICATIONS_ENABLED = 'true';
+ assert.equal((await post('apple/sandbox', { signedPayload: 'signed.test.payload' })).status, 204);
+ assert.equal(verify.mock.callCount(), 1);
+ assert.deepEqual(info.mock.calls.map(call => call.arguments), [
+  ['[store/notifications] parental consent withdrawn', { environment: 'Sandbox' }],
+ ]);
+
+ appTransaction = undefined;
+ assert.equal((await post('apple/sandbox', { signedPayload: 'signed.test.payload' })).status, 400);
+ assert.equal(verify.mock.callCount(), 1);
+});
